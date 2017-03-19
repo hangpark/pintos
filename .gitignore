@@ -1,0 +1,8 @@
+bochs/
+build/
+examples/
+*.output
+*.txt
+*.swp
+*.o
+*.d
