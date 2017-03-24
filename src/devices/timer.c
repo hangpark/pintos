@@ -28,6 +28,7 @@ static unsigned loops_per_tick;
    ordered by timer_tick; */
 static struct list timer_list;
 
+static list_less_func timer_compare_ticks;
 static intr_handler_func timer_interrupt;
 static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
@@ -99,15 +100,29 @@ timer_elapsed (int64_t then)
   return timer_ticks () - then;
 }
 
+/* Compares ticks of two threads and returns true
+   if previous one has less ticks. */
+static bool
+timer_compare_ticks (const struct list_elem *e1, const struct list_elem *e2,
+                     void *aux UNUSED)
+{
+  struct thread *t1 = list_entry (e1, struct thread, timer_elem);
+  struct thread *t2 = list_entry (e2, struct thread, timer_elem);
+  return t1->timer_ticks < t2->timer_ticks;
+}
+
+
 /* Suspends execution for approximately TICKS timer ticks. */
 void
 timer_sleep (int64_t ticks) 
 {
-  int64_t start = timer_ticks ();
-
-  ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+  enum intr_level old_level = intr_disable ();
+  struct thread *t = thread_current ();
+  t->timer_ticks = timer_ticks () + ticks;
+  list_insert_ordered (&timer_list, &t->timer_elem,
+                       timer_compare_ticks, NULL);
+  thread_block ();
+  intr_set_level (old_level);
 }
 
 /* Suspends execution for approximately MS milliseconds. */
