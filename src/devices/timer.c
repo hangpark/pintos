@@ -158,6 +158,18 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
+  struct list_elem *e;
+  for (e = list_begin (&timer_list); e != list_end (&timer_list);)
+    {
+      struct thread *t = list_entry (e, struct thread, timer_elem);
+      if (t->timer_ticks <= ticks)
+        {
+          thread_unblock (t);
+          e = list_remove (e);
+        }
+      else
+        break;
+    }
   thread_tick ();
 }
 
