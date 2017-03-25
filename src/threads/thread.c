@@ -70,7 +70,6 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
-static list_less_func thread_compare_priority;
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -333,6 +332,17 @@ thread_get_priority (void)
   return thread_current ()->priority;
 }
 
+/* Compares priorities of two threads and returns true
+   if previous one has higher priority. */
+bool
+thread_compare_priority (const struct list_elem *e1,
+                         const struct list_elem *e2, void *aux UNUSED)
+{
+  struct thread *t1 = list_entry (e1, struct thread, elem);
+  struct thread *t2 = list_entry (e2, struct thread, elem);
+  return t1->priority > t2->priority;
+}
+
 /* Sets the current thread's nice value to NICE. */
 void
 thread_set_nice (int nice UNUSED) 
@@ -560,18 +570,6 @@ allocate_tid (void)
 
   return tid;
 }
-
-/* Compares priorities of two threads and returns true
-   if previous one has higher priority. */
-static bool
-thread_compare_priority (const struct list_elem *e1,
-                         const struct list_elem *e2, void *aux UNUSED)
-{
-  struct thread *t1 = list_entry (e1, struct thread, elem);
-  struct thread *t2 = list_entry (e2, struct thread, elem);
-  return t1->priority > t2->priority;
-}
-
 
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
