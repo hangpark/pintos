@@ -54,12 +54,8 @@ First line of a commit message should be less than or equal to 50 words with
 following format which summarizes the commit:
 
 ```
-{Refs|Resolved|Fixed} #IssueNumber -- Starts with a capital letter ends without comma
+[#IssueNumber] Starts with a capital letter ends without comma
 ```
-
-- Refs - Basic type
-- Resolved - When a commit resolves the issue and should close it
-- Fixed - When a commit fixes a bug and should close the corresponding issue
 
 Seperate paragraph with a single blank line. Explain details of the commit from
 the second paragraph. Each line in a paragraph should be less than or equal to
@@ -67,9 +63,29 @@ the second paragraph. Each line in a paragraph should be less than or equal to
 
 ## Branch Naming Convention
 
-`master` and `develop` branches are basic. Try to use one of
+`master` and `develop` branches are basic. Try to use
 
-- `feature/#IssueNum/simple-desc-of-issue`
-- `hotfix/#IssueNum/simple-desc-of-issue`
+- `iss/IssueNum`
 
-to name local branches. Do **NOT** push local branches into the git server.
+to name branches for issues.
+
+## Pull Request Convention
+
+All works for an issue is done in an issue branch with naming it like above.
+Say it `iss/10`. And then check coding conventions and rebase commits on
+`iss/10` with `git rebase -i`. Push `iss/10` to `origin` with `git push origin
+iss/10`.
+
+In GitHub, make a PR from `iss/10` to `develop` with title
+`[#IssueNum] IssueTitle` and add reviewers and extra informations for the PR.
+Then, other team members will review your code.
+
+## Review Convnetion
+
+Every reviewers should review codes modified by PR. Reviewers can request
+changes. All members should participate in reviewing and discussing as much
+possible.
+
+If an assignee should update code, use a *force push*.
+
+After reviewing, last reviewer should merge and then delete an issue branch.
