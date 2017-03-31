@@ -296,7 +296,7 @@ lock_retrieve ()
 
   if (list_empty (list))
     return priority;
- 
+
   struct list_elem *e;
   for (e = list_begin (list); e != list_end (list); e = list_next (e))
     {
