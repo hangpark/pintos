@@ -88,9 +88,16 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
+    int priority_orig;                  /* Original priority. */
+    struct lock *waiting_lock;          /* Waiting lock. */
+    struct list lock_list;              /* Lock list that this is holding. */
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
+
+    /* Owned by devices/timer.c. */
+    struct list_elem timer_elem;        /* Timer list element. */
+    int64_t timer_ticks;                /* Tick to wake-up. */
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -127,6 +134,7 @@ void thread_yield (void);
 
 int thread_get_priority (void);
 void thread_set_priority (int);
+list_less_func thread_compare_priority;
 
 int thread_get_nice (void);
 void thread_set_nice (int);

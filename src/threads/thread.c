@@ -199,6 +199,10 @@ thread_create (const char *name, int priority,
   /* Add to run queue. */
   thread_unblock (t);
 
+  /* Yield for preemption. */
+  if (t->priority > thread_get_priority ())
+    thread_yield ();
+
   return tid;
 }
 
@@ -235,7 +239,7 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_push_back (&ready_list, &t->elem);
+  list_insert_ordered (&ready_list, &t->elem, thread_compare_priority, NULL);
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -303,8 +307,9 @@ thread_yield (void)
   ASSERT (!intr_context ());
 
   old_level = intr_disable ();
-  if (curr != idle_thread) 
-    list_push_back (&ready_list, &curr->elem);
+  if (curr != idle_thread)
+    list_insert_ordered (&ready_list, &curr->elem,
+                         thread_compare_priority, NULL);
   curr->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -314,7 +319,13 @@ thread_yield (void)
 void
 thread_set_priority (int new_priority) 
 {
-  thread_current ()->priority = new_priority;
+  struct thread *curr = thread_current ();
+  int old_priority = curr->priority;
+  if (curr->priority == curr->priority_orig || new_priority > old_priority)
+    curr->priority = new_priority;
+  curr->priority_orig = new_priority;
+  if (old_priority > curr->priority)
+    thread_yield();
 }
 
 /* Returns the current thread's priority. */
@@ -322,6 +333,17 @@ int
 thread_get_priority (void) 
 {
   return thread_current ()->priority;
+}
+
+/* Compares priorities of two threads and returns true
+   if previous one has higher priority. */
+bool
+thread_compare_priority (const struct list_elem *e1,
+                         const struct list_elem *e2, void *aux UNUSED)
+{
+  struct thread *t1 = list_entry (e1, struct thread, elem);
+  struct thread *t2 = list_entry (e2, struct thread, elem);
+  return t1->priority > t2->priority;
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -439,6 +461,9 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
+  t->priority_orig = priority;
+  t->waiting_lock = NULL;
+  list_init (&t->lock_list);
   t->magic = THREAD_MAGIC;
 }
 
