@@ -6,3 +6,4 @@ examples/
 *.swp
 *.o
 *.d
+!src/tests/**/*.txt
