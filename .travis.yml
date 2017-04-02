@@ -1,5 +1,10 @@
 sudo: required
 
+branches:
+  only:
+    - master
+    - develop
+
 language: c
 
 services:
