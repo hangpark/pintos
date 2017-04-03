@@ -17,9 +17,20 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "threads/malloc.h"
+
+#define WORD_SIZE sizeof (uintptr_t)
+
+/* Structure for arguments. */
+struct arguments
+  { 
+    int argc;                /* Number of arguments. */ 
+    char **argv;             /* Array of arguments. */
+  };
 
 static thread_func start_process NO_RETURN;
-static bool load (const char *cmdline, void (**eip) (void), void **esp);
+static bool load (struct arguments *args, void (**eip) (void), void **esp);
+static void argument_parser(char *str, struct arguments *args);
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -29,6 +40,7 @@ tid_t
 process_execute (const char *file_name) 
 {
   char *fn_copy;
+  struct arguments *args;   
   tid_t tid;
 
   /* Make a copy of FILE_NAME.
@@ -38,19 +50,43 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
+  /* Parse argument into the structure. */
+  args = (struct arguments *) malloc (sizeof (struct arguments));
+  argument_parser (fn_copy, args); 
+
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create (args->argv[0], PRI_DEFAULT, start_process, args);
   if (tid == TID_ERROR)
-    palloc_free_page (fn_copy); 
+    {
+      free(args->argv);
+      free(args);
+      palloc_free_page (fn_copy); 
+    }
   return tid;
+}
+
+/* Parse arguments from given string, which removes whole adjacent spaces and replace it  
+   with a null character. And then stores it in given argument struct by pointer. */
+static void
+argument_parser (char *str_input, struct arguments *args)
+{
+  char *leftover;
+  char *curr;
+
+  args->argc = 0;
+  args->argv = (char **) calloc (strlen (str_input) + 1, sizeof (char));
+  
+  for (curr = strtok_r (str_input, " ", &leftover); curr != NULL;
+       curr = strtok_r (NULL, " ", &leftover))
+     args->argv[args->argc ++] = curr;
 }
 
 /* A thread function that loads a user process and makes it start
    running. */
 static void
-start_process (void *f_name)
+start_process (void *arguments)
 {
-  char *file_name = f_name;
+  struct arguments *args = arguments;
   struct intr_frame if_;
   bool success;
 
@@ -59,13 +95,15 @@ start_process (void *f_name)
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
+  success = load (args, &if_.eip, &if_.esp);
 
-  /* If load failed, quit. */
-  palloc_free_page (file_name);
-  if (!success) 
-    thread_exit ();
-
+  /* If load failed, quit. */ 
+  if (!success)
+    {
+      free(args->argv);
+      free(args);
+      thread_exit ();
+    }
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -201,17 +239,19 @@ static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
                           bool writable);
+static void push_args_on_stack(struct arguments *args, void **esp);
 
 /* Loads an ELF executable from FILE_NAME into the current thread.
    Stores the executable's entry point into *EIP
    and its initial stack pointer into *ESP.
    Returns true if successful, false otherwise. */
 bool
-load (const char *file_name, void (**eip) (void), void **esp) 
+load (struct arguments *args, void (**eip) (void), void **esp) 
 {
   struct thread *t = thread_current ();
   struct Elf32_Ehdr ehdr;
   struct file *file = NULL;
+  char *file_name = args->argv[0];
   off_t file_ofs;
   bool success = false;
   int i;
@@ -305,6 +345,8 @@ load (const char *file_name, void (**eip) (void), void **esp)
   /* Set up stack. */
   if (!setup_stack (esp))
     goto done;
+
+  push_args_on_stack (args, esp);
 
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
@@ -438,7 +480,7 @@ setup_stack (void **esp)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
-        *esp = PHYS_BASE - 12; // Temporary measure
+        *esp = PHYS_BASE;
       else
         palloc_free_page (kpage);
     }
@@ -463,4 +505,63 @@ install_page (void *upage, void *kpage, bool writable)
      address, then map our page there. */
   return (pagedir_get_page (t->pagedir, upage) == NULL
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
+}
+
+/* Push arguments on newly initialized stack, following calling conventions.
+   This invention does not use esp dynamically, just making it point bottom of 
+   stack frame after all push is done.*/
+static void
+push_args_on_stack(struct arguments *args, void **esp)
+{
+  void **arg_ptrs = (void **) calloc (args->argc, sizeof (void *));
+  void *curr = *esp;
+
+  int arg_len; 
+  int alignment;
+  int zero = 0;
+  int i;
+  void *dest;
+
+  /* Push arguments on stack, save their address in arg_ptrs. */
+  for (i = args->argc - 1; i >= 0; i--)
+    {
+      arg_len = strlen (args->argv[i]) + 1;
+      dest = curr - arg_len;
+      memcpy (dest, args->argv[i], arg_len);
+      arg_ptrs[i] = dest;
+      curr = dest; 
+    }
+  
+  /* Align, and push bytes required for aligning. */
+  alignment = ((uint32_t) curr) % WORD_SIZE;
+  for (i = 0; i < alignment ; i++)
+     memcpy (--curr, &zero, 1);
+
+  /* Insert pointer to argv[argc], which must be empty. */
+  curr -= WORD_SIZE;
+  memcpy (curr, &zero, WORD_SIZE);
+
+  /* Push a pointer to argv[argc-1], argv[argc-2] ...
+     until a pointer to argv[0] is pushed. */
+  for (i = (args->argc -1); i >= 0; i--)
+    {
+      curr -= WORD_SIZE;
+      memcpy (curr, &arg_ptrs[i], WORD_SIZE);
+    }
+  free (arg_ptrs);
+
+  /* Push address of argv on stack. */
+  curr -= WORD_SIZE;
+  memcpy (curr, &curr, WORD_SIZE);
+
+  /* Push argument count on stack. */
+  curr -= WORD_SIZE;
+  memcpy (curr, &(args->argc), WORD_SIZE);
+
+  /* Push return address as 0 values. */
+  curr -= WORD_SIZE;
+  memcpy (curr, &zero, WORD_SIZE);
+
+  /* ESP pointing bottom of the stack. */
+  *esp = (void *) curr;
 }
