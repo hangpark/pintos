@@ -1,6 +1,5 @@
 bochs/
 build/
-examples/
 *.output
 *.txt
 *.swp
