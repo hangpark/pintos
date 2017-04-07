@@ -1,8 +1,10 @@
 bochs/
 build/
 *.output
-*.txt
-*.swp
 *.o
 *.d
+*.txt
 !src/tests/**/*.txt
+src/examples/**/*
+src/examples/**/*.a
+*.swp
