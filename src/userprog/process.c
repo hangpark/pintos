@@ -19,8 +19,6 @@
 #include "threads/vaddr.h"
 #include "threads/malloc.h"
 
-#define WORD_SIZE sizeof (uintptr_t)
-
 /* Structure for arguments. */
 struct arguments
   { 
@@ -513,55 +511,44 @@ install_page (void *upage, void *kpage, bool writable)
 static void
 push_args_on_stack(struct arguments *args, void **esp)
 {
-  void **arg_ptrs = (void **) calloc (args->argc, sizeof (void *));
-  void *curr = *esp;
-
-  int arg_len; 
-  int alignment;
-  int zero = 0;
+  uint32_t **arg_ptrs = (uint32_t **) calloc (args->argc, sizeof (uint32_t *));
+  uint8_t *curr8 = (uint8_t *) *esp;
   int i;
-  void *dest;
 
   /* Push arguments on stack, save their address in arg_ptrs. */
+  int arg_len;
   for (i = args->argc - 1; i >= 0; i--)
     {
       arg_len = strlen (args->argv[i]) + 1;
-      dest = curr - arg_len;
-      memcpy (dest, args->argv[i], arg_len);
-      arg_ptrs[i] = dest;
-      curr = dest; 
+      curr8 -= arg_len;
+      memcpy (curr8, args->argv[i], arg_len);
+      arg_ptrs[i] = (uint32_t *) curr8;
     }
   
   /* Align, and push bytes required for aligning. */
-  alignment = ((uint32_t) curr) % WORD_SIZE;
+  int alignment = ((uint32_t) curr8) % sizeof (uintptr_t);
   for (i = 0; i < alignment ; i++)
-     memcpy (--curr, &zero, 1);
+     *--curr8 = 0;
 
   /* Insert pointer to argv[argc], which must be empty. */
-  curr -= WORD_SIZE;
-  memcpy (curr, &zero, WORD_SIZE);
+  uint32_t *curr32 = (uint32_t *) curr8;
+  *--curr32 = 0;
 
   /* Push a pointer to argv[argc-1], argv[argc-2] ...
      until a pointer to argv[0] is pushed. */
-  for (i = (args->argc -1); i >= 0; i--)
-    {
-      curr -= WORD_SIZE;
-      memcpy (curr, &arg_ptrs[i], WORD_SIZE);
-    }
+  for (i = args->argc - 1; i >= 0; i--)
+    *--curr32 = arg_ptrs[i];
   free (arg_ptrs);
 
   /* Push address of argv on stack. */
-  curr -= WORD_SIZE;
-  memcpy (curr, &curr, WORD_SIZE);
+  *--curr32 = (uint32_t) (curr32 + 1);
 
   /* Push argument count on stack. */
-  curr -= WORD_SIZE;
-  memcpy (curr, &(args->argc), WORD_SIZE);
+  *--curr32 = (uint32_t) args->argc;
 
   /* Push return address as 0 values. */
-  curr -= WORD_SIZE;
-  memcpy (curr, &zero, WORD_SIZE);
+  *--curr32 = 0;
 
   /* ESP pointing bottom of the stack. */
-  *esp = (void *) curr;
+  *esp = (void *) curr32;
 }
