@@ -101,7 +101,8 @@ syscall_halt (void)
 static void 
 syscall_exit (int status)
 {
-
+  printf ("%s: exit(%d)\n", thread_current ()->name, status);
+  thread_exit ();
 }
 
 static pid_t 
@@ -149,7 +150,9 @@ syscall_read (int fd, void *buffer, unsigned size)
 static int 
 syscall_write (int fd, void *buffer, unsigned size)
 {
-  return 0;
+  if (fd == STDOUT_FILENO)
+    putbuf (buffer, size);
+  return size;
 }
 
 static void 
