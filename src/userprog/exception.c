@@ -1,7 +1,9 @@
 #include "userprog/exception.h"
 #include <inttypes.h>
 #include <stdio.h>
+#include <debug.h>
 #include "userprog/gdt.h"
+#include "userprog/syscall.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
@@ -148,14 +150,17 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
-  /* To implement virtual memory, delete the rest of the function
-     body, and replace it with code that brings in the page to
-     which fault_addr refers. */
-  printf ("Page fault at %p: %s error %s page in %s context.\n",
-          fault_addr,
-          not_present ? "not present" : "rights violation",
-          write ? "writing" : "reading",
-          user ? "user" : "kernel");
-  kill (f);
+  /* Change EIP to the next instruction address which is saved on
+     EAX, and set EAX by -1 to return the failure code. */
+  if (!user)
+    {
+      f->eip = (void (*) (void)) f->eax;
+      f->eax = (uint32_t) 0xffffffff;
+      return;
+    }
+
+  /* Terminate the process. */
+  syscall_exit (-1);
+  NOT_REACHED ();
 }
 
