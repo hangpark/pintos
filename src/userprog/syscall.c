@@ -4,6 +4,7 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/synch.h"
+#include "userprog/process.h"
 
 #define pid_t int
 
@@ -100,10 +101,21 @@ syscall_exit (int status)
 
 }
 
+/* Execute command line input, by calling process_execute (), 
+   and return resulting PID. */
 static pid_t 
 syscall_exec (const char *cmd_line)
-{
-  return -1;
+{ 
+  /* Execution of file should not be interfered by other syscalls,
+     i.e. it should not be modified before instruction executing it
+     has completed its task. */
+  lock_acquire (&sys_lock);
+  pid_t pid = (pid_t) process_execute (cmd_line);
+  lock_release (&sys_lock);
+
+  if (pid == (pid_t) TID_ERROR)
+    return -1;
+  return pid;
 }
 
 static int 
