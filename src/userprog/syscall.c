@@ -1,9 +1,11 @@
 #include "userprog/syscall.h"
 #include <stdio.h>
 #include <syscall-nr.h>
+#include <debug.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/synch.h"
+#include "threads/init.h"
 
 #define pid_t int
 
@@ -88,10 +90,12 @@ syscall_handler (struct intr_frame *f UNUSED)
     }
 }
 
+/* Terminate pintos. */
 static void 
 syscall_halt (void)
 {
-
+  power_off ();
+  NOT_REACHED ();
 }
 
 static void 
