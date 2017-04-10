@@ -97,6 +97,10 @@ thread_init (void)
   init_thread (initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
+#ifdef USERPROG
+  (&initial_thread->process)->pid = (pid_t) initial_thread->tid;
+  (&initial_thread->process)->parent = NULL;
+#endif
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -181,6 +185,18 @@ thread_create (const char *name, int priority,
   /* Initialize thread. */
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
+
+#ifdef USERPROG
+  struct process *curr_proc = process_current ();
+  struct process *new_proc = &t->process;
+
+  new_proc->pid = t->tid;
+  new_proc->parent = curr_proc;
+  new_proc->status = PROCESS_LOADING;
+  new_proc->exit_status = -1;
+  new_proc->is_waiting = false;
+  list_push_back (&curr_proc->child_list, &new_proc->elem);
+#endif
 
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
@@ -465,6 +481,11 @@ init_thread (struct thread *t, const char *name, int priority)
   t->waiting_lock = NULL;
   list_init (&t->lock_list);
   t->magic = THREAD_MAGIC;
+
+#ifdef USERPROG
+  list_init (&(&t->process)->child_list);
+  list_init (&(&t->process)->file_list);
+#endif
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and

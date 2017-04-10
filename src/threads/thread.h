@@ -4,6 +4,9 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#ifdef USERPROG
+#include "userprog/process.h"
+#endif
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -101,6 +104,7 @@ struct thread
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
+    struct process process;             /* User process. */
     uint32_t *pagedir;                  /* Page directory. */
 #endif
 
