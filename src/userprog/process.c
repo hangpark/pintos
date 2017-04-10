@@ -136,14 +136,33 @@ start_process (void *arguments)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-  while (1); // Temporary measure
-  return -1;
+  struct process *curr = process_current ();
+  struct process *child = process_find_child (curr, child_tid);
+
+  if (child == NULL || child->is_waiting)
+    return -1;
+  child->is_waiting = true;
+  while (!(child->status & PROCESS_EXIT))
+    thread_yield ();
+
+  return child->exit_code;
 }
 
 /* Free the current process's resources. */
 void
 process_exit (void)
 {
+  struct process *proc = process_current ();
+  proc->status |= PROCESS_EXIT;
+  struct list_elem *e;
+  for (e = list_begin (&proc->child_list); e != list_end (&proc->child_list);
+       e = list_next (e))
+    {
+      struct process *child = list_entry (e, struct process, elem);
+      if (!(child->status & PROCESS_EXIT))
+        child->parent = NULL;
+    }
+
   struct thread *curr = thread_current ();
   uint32_t *pd;
 
@@ -192,12 +211,11 @@ process_current (void)
 struct process *
 process_find_child (struct process *proc, pid_t pid)
 {
-  struct process *child;
   struct list_elem *e;
   for (e = list_begin (&proc->child_list); e != list_end (&proc->child_list);
        e = list_next (e))
     {
-      child = list_entry (e, struct process, elem);
+      struct process *child = list_entry (e, struct process, elem);
       if (child->pid == pid)
         return child;
     }

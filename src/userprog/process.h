@@ -24,7 +24,7 @@ struct process
     struct list_elem elem;          /* List element. */
 
     int status;                     /* Process status. */
-    int exit_status;                /* Exit status. */
+    int exit_code;                  /* Exit code. */
     bool is_waiting;                /* Whether parent is waiting or not. */
   };
 
