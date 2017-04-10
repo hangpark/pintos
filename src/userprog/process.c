@@ -27,25 +27,26 @@ struct arguments
   };
 
 static thread_func start_process NO_RETURN;
-static bool load (struct arguments *args, void (**eip) (void), void **esp);
+static bool load (struct arguments *args, void (**eip) (void), void **esp,
+                  struct file **exec_file);
 static void argument_parser(char *str, struct arguments *args);
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
    thread id, or TID_ERROR if the thread cannot be created. */
-tid_t
+pid_t
 process_execute (const char *file_name) 
 {
   char *fn_copy;
   struct arguments *args;   
-  tid_t tid;
+  pid_t pid;
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
   if (fn_copy == NULL)
-    return TID_ERROR;
+    return PID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
   /* Parse argument into the structure. */
@@ -53,14 +54,14 @@ process_execute (const char *file_name)
   argument_parser (fn_copy, args); 
 
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (args->argv[0], PRI_DEFAULT, start_process, args);
-  if (tid == TID_ERROR)
+  pid = (pid_t) thread_create (args->argv[0], PRI_DEFAULT, start_process, args);
+  if (pid == TID_ERROR)
     {
       free(args->argv);
       free(args);
       palloc_free_page (fn_copy); 
     }
-  return tid;
+  return pid;
 }
 
 /* Parse arguments from given string, which removes whole adjacent spaces and replace it  
@@ -85,6 +86,7 @@ static void
 start_process (void *arguments)
 {
   struct arguments *args = arguments;
+  struct file *exec_file;
   struct intr_frame if_;
   bool success;
 
@@ -93,7 +95,16 @@ start_process (void *arguments)
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (args, &if_.eip, &if_.esp);
+  success = load (args, &if_.eip, &if_.esp, &exec_file);
+
+  /* Save load result. */
+  struct process *curr = process_current ();
+  if (success)
+    curr->status |= PROCESS_RUNNING;
+  else
+    curr->status |= PROCESS_FAIL;
+  curr->exec_file = exec_file;
+  list_init (&curr->file_list);
 
   /* If load failed, quit. */ 
   if (!success)
@@ -102,6 +113,7 @@ start_process (void *arguments)
       free(args);
       thread_exit ();
     }
+
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -167,6 +179,29 @@ process_activate (void)
   /* Set thread's kernel stack for use in processing
      interrupts. */
   tss_update ();
+}
+
+/* Returns the current process. */
+struct process *
+process_current (void)
+{
+  return &thread_current ()->process;
+}
+
+/* Returns the child process of the given process with the given pid value. */
+struct process *
+process_find_child (struct process *proc, pid_t pid)
+{
+  struct process *child;
+  struct list_elem *e;
+  for (e = list_begin (&proc->child_list); e != list_end (&proc->child_list);
+       e = list_next (e))
+    {
+      child = list_entry (e, struct process, elem);
+      if (child->pid == pid)
+        return child;
+    }
+  return NULL;
 }
 
 /* We load ELF binaries.  The following definitions are taken
@@ -244,7 +279,8 @@ static void push_args_on_stack(struct arguments *args, void **esp);
    and its initial stack pointer into *ESP.
    Returns true if successful, false otherwise. */
 bool
-load (struct arguments *args, void (**eip) (void), void **esp) 
+load (struct arguments *args, void (**eip) (void), void **esp,
+      struct file **exec_file) 
 {
   struct thread *t = thread_current ();
   struct Elf32_Ehdr ehdr;
@@ -348,6 +384,9 @@ load (struct arguments *args, void (**eip) (void), void **esp)
 
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
+
+  /* Save the executable file. */
+  *exec_file = file;
 
   success = true;
 
