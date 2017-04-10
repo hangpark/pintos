@@ -12,6 +12,7 @@
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #ifdef USERPROG
+#include "threads/malloc.h"
 #include "userprog/process.h"
 #endif
 
@@ -193,7 +194,7 @@ thread_create (const char *name, int priority,
   new_proc->pid = t->tid;
   new_proc->parent = curr_proc;
   new_proc->status = PROCESS_LOADING;
-  new_proc->exit_status = -1;
+  new_proc->exit_code = -1;
   new_proc->is_waiting = false;
   list_push_back (&curr_proc->child_list, &new_proc->elem);
 #endif
