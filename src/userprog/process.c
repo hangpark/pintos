@@ -167,6 +167,7 @@ process_exit (void)
   /* Free resources. */
   proc->status |= PROCESS_EXIT;
   list_remove (&proc->elem);
+  file_close (proc->exec_file);
 
   struct thread *curr = thread_current ();
   uint32_t *pd;
@@ -310,13 +311,12 @@ load (struct arguments *args, void (**eip) (void), void **esp,
   struct file *file = NULL;
   char *file_name = args->argv[0];
   off_t file_ofs;
-  bool success = false;
   int i;
 
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
   if (t->pagedir == NULL) 
-    goto done;
+    goto fail;
   process_activate ();
 
   /* Open executable file. */
@@ -324,8 +324,11 @@ load (struct arguments *args, void (**eip) (void), void **esp,
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", file_name);
-      goto done; 
+      goto fail;
     }
+
+  /* Deny writing to executable file. */
+  file_deny_write (file);
 
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
@@ -337,7 +340,7 @@ load (struct arguments *args, void (**eip) (void), void **esp,
       || ehdr.e_phnum > 1024) 
     {
       printf ("load: %s: error loading executable\n", file_name);
-      goto done; 
+      goto fail;
     }
 
   /* Read program headers. */
@@ -347,11 +350,11 @@ load (struct arguments *args, void (**eip) (void), void **esp,
       struct Elf32_Phdr phdr;
 
       if (file_ofs < 0 || file_ofs > file_length (file))
-        goto done;
+        goto fail;
       file_seek (file, file_ofs);
 
       if (file_read (file, &phdr, sizeof phdr) != sizeof phdr)
-        goto done;
+        goto fail;
       file_ofs += sizeof phdr;
       switch (phdr.p_type) 
         {
@@ -365,7 +368,7 @@ load (struct arguments *args, void (**eip) (void), void **esp,
         case PT_DYNAMIC:
         case PT_INTERP:
         case PT_SHLIB:
-          goto done;
+          goto fail;
         case PT_LOAD:
           if (validate_segment (&phdr, file)) 
             {
@@ -391,17 +394,17 @@ load (struct arguments *args, void (**eip) (void), void **esp,
                 }
               if (!load_segment (file, file_page, (void *) mem_page,
                                  read_bytes, zero_bytes, writable))
-                goto done;
+                goto fail;
             }
           else
-            goto done;
+            goto fail;
           break;
         }
     }
 
   /* Set up stack. */
   if (!setup_stack (esp))
-    goto done;
+    goto fail;
 
   push_args_on_stack (args, esp);
 
@@ -411,12 +414,12 @@ load (struct arguments *args, void (**eip) (void), void **esp,
   /* Save the executable file. */
   *exec_file = file;
 
-  success = true;
+  return true;
 
- done:
-  /* We arrive here whether the load is successful or not. */
+ fail:
+  /* We arrive here when the load is failed. */
   file_close (file);
-  return success;
+  return false;
 }
 
 /* load() helpers. */
