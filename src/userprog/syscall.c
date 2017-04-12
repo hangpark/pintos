@@ -335,12 +335,36 @@ syscall_read (int fd, void *buffer, unsigned size)
   return bytes;
 }
 
+/* Writes size bytes from buffer to the open file fd.
+   Returns the number of bytes actually written. */
 static int 
 syscall_write (int fd, void *buffer, unsigned size)
 {
+  /* Check the validity. */
+  validate_ptr (buffer);
+
+  /* Write to STDOUT. */
   if (fd == STDOUT_FILENO)
-    putbuf (buffer, size);
-  return size;
+    {
+      putbuf (buffer, size);
+      return size;
+    }
+
+  /* Get the file. */
+  lock_acquire (&filesys_lock);
+  struct file *file = process_get_file (fd);
+  if (file == NULL)
+    {
+      lock_release (&filesys_lock);
+      return -1;
+    }
+
+  /* Write to the file. */
+  int bytes = file_write (file, buffer, size);
+
+  /* Return bytes written. */
+  lock_release (&filesys_lock);
+  return bytes;
 }
 
 /* Changes the next byte to be read or written in open file fd
