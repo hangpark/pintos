@@ -329,10 +329,27 @@ syscall_seek (int fd, unsigned position)
   lock_release (&filesys_lock);
 }
 
+/* Returns the position of the next byte to be read or written
+   in open file fd, expressed in bytes from the beginning
+   of the file. */
 static unsigned 
 syscall_tell (int fd)
 {
-  return 1;
+  /* Open the file. */
+  lock_acquire (&filesys_lock);
+  struct file *file = process_get_file (fd);
+  if (file == NULL)
+    {
+      lock_release (&filesys_lock);
+      return -1;
+    }
+
+  /* Get the position. */
+  unsigned position = file_tell (file);
+
+  /* Return the position. */
+  lock_release (&filesys_lock);
+  return position;
 }
 
 /* Closes file descriptor. */
