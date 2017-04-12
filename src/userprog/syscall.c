@@ -306,8 +306,24 @@ syscall_tell (int fd)
   return 1;
 }
 
+/* Closes file descriptor. */
 static void 
 syscall_close (int fd)
 {
-
+  lock_acquire (&filesys_lock);
+  struct list *list = &process_current ()->file_list;
+  struct list_elem *e;
+  for (e = list_begin (list); e != list_end (list); e = list_next (e))
+    {
+      struct process_file *pfe = list_entry (e, struct process_file, elem);
+      if (pfe->fd == fd)
+        {
+          file_close (pfe->file);
+          list_remove (e);
+          free (pfe);
+          lock_release (&filesys_lock);
+          return;
+        }
+    }
+  lock_release (&filesys_lock);
 }
