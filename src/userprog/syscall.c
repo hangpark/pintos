@@ -174,7 +174,7 @@ void
 syscall_exit (int status)
 {
   /* Set exit code. */
-  process_current ()->exit_code = status;
+  process_current ()->info->exit_code = status;
 
   /* Print the termination message. */
   printf ("%s: exit(%d)\n", thread_current ()->name, status);
@@ -199,16 +199,16 @@ syscall_exec (const char *cmd_line)
     return pid;
 
   /* Obtain the new process. */
-  struct process *p = process_find_child (process_current (), pid);
-  if (p == NULL)
+  struct process_info *child = process_find_child (process_current (), pid);
+  if (child == NULL)
     return PID_ERROR;
 
   /* Wait until the new process is successfully loaded. */
-  while (p->status == PROCESS_LOADING)
+  while (child->status == PROCESS_LOADING)
     thread_yield ();
 
   /* Return PID. */
-  if (p->status & PROCESS_FAIL)
+  if (child->status & PROCESS_FAIL)
     return PID_ERROR;
   return pid;
 }

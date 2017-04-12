@@ -189,14 +189,23 @@ thread_create (const char *name, int priority,
 #ifdef USERPROG
   struct process *curr_proc = process_current ();
   struct process *new_proc = &t->process;
+  struct process_info *new_proc_info;
 
   /* Initialize process. */
-  new_proc->pid = t->tid;
+  new_proc->pid = (pid_t) t->tid;
   new_proc->parent = curr_proc;
-  new_proc->status = PROCESS_LOADING;
-  new_proc->exit_code = -1;
-  new_proc->is_waiting = false;
-  list_push_back (&curr_proc->child_list, &new_proc->elem);
+
+  new_proc_info = (struct process_info *) malloc (sizeof (struct process_info));
+  if (new_proc_info == NULL)
+    return TID_ERROR;
+
+  new_proc->info = new_proc_info;
+  new_proc_info->pid = (pid_t) t->tid;
+  new_proc_info->process = new_proc;
+  new_proc_info->status = PROCESS_LOADING;
+  new_proc_info->exit_code = -1;
+  new_proc_info->is_waiting = false;
+  list_push_back (&curr_proc->child_list, &new_proc_info->elem);
 #endif
 
   /* Stack frame for kernel_thread(). */
