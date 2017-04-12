@@ -11,7 +11,7 @@
 #define pid_t int
 
 /* A Lock for mutual exclusion between system calls. */
-static struct lock sys_lock;
+static struct lock filesys_lock;
 
 static int get_byte (const uint8_t *uaddr);
 static bool put_byte (uint8_t *udst, uint8_t byte);
@@ -35,7 +35,7 @@ static void syscall_close (int fd);
 void
 syscall_init (void) 
 {
-  lock_init(&sys_lock);
+  lock_init(&filesys_lock);
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
@@ -202,10 +202,15 @@ syscall_wait (pid_t pid)
   return process_wait (pid);
 }
 
+/* Creates a new file initially the given bytes in size.
+   Returns true if successful, false otherwise. */
 static bool 
 syscall_create (const char *file, unsigned init_size)
 {
-  return true;
+  lock_acquire (&filesys_lock);
+  bool success = filesys_create (file, init_size);
+  lock_release (&filesys_lock);
+  return success;
 }
 
 static bool 
