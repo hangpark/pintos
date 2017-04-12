@@ -190,10 +190,11 @@ syscall_exec (const char *cmd_line)
   return p->pid;
 }
 
+/* Waits for a child process pid and retrieves the child's exit status. */
 static int 
 syscall_wait (pid_t pid)
 {
-  return 0;
+  return process_wait (pid);
 }
 
 static bool 
