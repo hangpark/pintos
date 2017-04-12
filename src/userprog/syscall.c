@@ -235,10 +235,18 @@ syscall_create (const char *file, unsigned init_size)
   return success;
 }
 
+/* Deletes the file. Returns true if successful, false otherwise. */
 static bool 
 syscall_remove (const char *file)
 {
-  return true;
+  /* Check the validity. */
+  validate_ptr (file);
+
+  /* Create a new file. */
+  lock_acquire (&filesys_lock);
+  bool success = filesys_remove (file);
+  lock_release (&filesys_lock);
+  return success;
 }
 
 static int 
