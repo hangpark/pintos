@@ -164,10 +164,30 @@ syscall_exit (int status)
   NOT_REACHED ();
 }
 
+/* Runs the executable whose name is given in cmd_line,
+   passing any given arguments, and returns the new process's
+   process id (pid). */
 static pid_t 
 syscall_exec (const char *cmd_line)
 {
-  return -1;
+  /* Create a new process. */
+  pid_t pid = process_execute (cmd_line);
+  if (pid == PID_ERROR)
+    return pid;
+
+  /* Obtain the new process. */
+  struct process *p = process_find_child (process_current (), pid);
+  if (p == NULL)
+    return PID_ERROR;
+
+  /* Wait until the new process is successfully loaded. */
+  while (p->status == PROCESS_LOADING)
+    thread_yield ();
+
+  /* Return PID. */
+  if (p->status & PROCESS_FAIL)
+    return PID_ERROR;
+  return p->pid;
 }
 
 static int 
