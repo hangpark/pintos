@@ -274,10 +274,25 @@ syscall_open (const char *file)
   return fd;
 }
 
+/* Returns the size, in bytes, of the file open as fd. */
 static int 
 syscall_filesize (int fd)
 {
-  return 0;
+  /* Open the file. */
+  lock_acquire (&filesys_lock);
+  struct file *file = process_get_file (fd);
+  if (file == NULL)
+    {
+      lock_release (&filesys_lock);
+      return -1;
+    }
+
+  /* Get the size of the file. */
+  int size = file_length (file);
+
+  /* Return the size of the file. */
+  lock_release (&filesys_lock);
+  return size;
 }
 
 static int 
