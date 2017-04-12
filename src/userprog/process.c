@@ -19,11 +19,13 @@
 #include "threads/vaddr.h"
 #include "threads/malloc.h"
 
+#define FD_MIN 2            /* Min value for file descriptors. */
+
 /* Structure for arguments. */
 struct arguments
   { 
-    int argc;                /* Number of arguments. */ 
-    char **argv;             /* Array of arguments. */
+    int argc;               /* Number of arguments. */
+    char **argv;            /* Array of arguments. */
   };
 
 static thread_func start_process NO_RETURN;
@@ -105,6 +107,7 @@ start_process (void *arguments)
   else
     curr->status |= PROCESS_FAIL;
   curr->exec_file = exec_file;
+  curr->fd_next = FD_MIN;
   list_init (&curr->file_list);
 
   /* If load failed, quit. */ 
@@ -166,6 +169,13 @@ process_exit (void)
   proc->status |= PROCESS_EXIT;
   list_remove (&proc->elem);
   file_close (proc->exec_file);
+  for (e = list_begin (&proc->file_list); e != list_end (&proc->file_list);)
+    {
+      struct process_file *pfe = list_entry (e, struct process_file, elem);
+      e = list_next (e);
+      file_close (pfe->file);
+      free (pfe);
+    }
 
   struct thread *curr = thread_current ();
   uint32_t *pd;
@@ -224,6 +234,41 @@ process_find_child (struct process *proc, pid_t pid)
         return child;
     }
   return NULL;
+}
+
+/* Returns a process' file by the file descriptor. */
+struct file *
+process_get_file (int fd)
+{
+  struct list *list = &process_current ()->file_list;
+  struct list_elem *e;
+  for (e = list_begin (list); e != list_end (list); e = list_next (e))
+    {
+      struct process_file *pfe = list_entry (e, struct process_file, elem);
+      if (pfe->fd == fd)
+        return pfe->file;
+    }
+  return NULL;
+}
+
+/* Sets the file into the current process and returns the file descriptor. */
+int
+process_set_file (struct file *file)
+{
+  /* Create a file element. */
+  struct process_file *pfe;
+  pfe = (struct process_file *) malloc (sizeof (struct process_file));
+  if (pfe == NULL)
+    return -1;
+
+  /* Initialize the file element. */
+  struct process *curr = process_current ();
+  pfe->fd = curr->fd_next++;
+  pfe->file = file;
+  list_push_back (&curr->file_list, &pfe->elem);
+
+  /* Return the file descriptor. */
+  return pfe->fd;
 }
 
 /* We load ELF binaries.  The following definitions are taken

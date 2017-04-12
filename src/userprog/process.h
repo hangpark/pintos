@@ -26,6 +26,7 @@ struct process
     int status;                     /* Process status. */
     int exit_code;                  /* Exit code. */
     bool is_waiting;                /* Whether parent is waiting or not. */
+    int fd_next;                    /* File descriptor tracker. */
   };
 
 /* A file held by some process. */
@@ -42,5 +43,7 @@ void process_exit (void);
 void process_activate (void);
 struct process *process_current (void);
 struct process *process_find_child (struct process *proc, pid_t pid);
+struct file *process_get_file (int fd);
+int process_set_file (struct file * file);
 
 #endif /* userprog/process.h */
