@@ -16,6 +16,7 @@ static struct lock filesys_lock;
 static int get_byte (const uint8_t *uaddr);
 static bool put_byte (uint8_t *udst, uint8_t byte);
 static uint32_t get_word (const uint32_t *uaddr);
+static void validate_ptr (const uint8_t *uaddr);
 
 static void syscall_handler (struct intr_frame *);
 
@@ -80,10 +81,24 @@ get_word (const uint32_t *uaddr)
     {
       byte = get_byte ((uint8_t *) uaddr + i);
       if (byte == -1)
-        syscall_exit (-1);
+        {
+          syscall_exit (-1);
+          NOT_REACHED ();
+        }
       *((uint8_t *) &res + i) = (uint8_t) byte;
     }
   return res;
+}
+
+/* Validates a given user virtual address. */
+static void
+validate_ptr (const uint8_t *uaddr)
+{
+  if (get_byte (uaddr) == -1)
+    {
+      syscall_exit (-1);
+      NOT_REACHED ();
+    }
 }
 
 /* Handler which matches the appropriate system call. */
@@ -175,6 +190,9 @@ syscall_exit (int status)
 static pid_t 
 syscall_exec (const char *cmd_line)
 {
+  /* Check the validity. */
+  validate_ptr (cmd_line);
+
   /* Create a new process. */
   pid_t pid = process_execute (cmd_line);
   if (pid == PID_ERROR)
@@ -207,6 +225,10 @@ syscall_wait (pid_t pid)
 static bool 
 syscall_create (const char *file, unsigned init_size)
 {
+  /* Check the validity. */
+  validate_ptr (file);
+
+  /* Create a new file. */
   lock_acquire (&filesys_lock);
   bool success = filesys_create (file, init_size);
   lock_release (&filesys_lock);
