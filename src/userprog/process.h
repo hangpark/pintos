@@ -21,12 +21,19 @@ struct process
     struct file *exec_file;         /* Process executable file. */
     struct list child_list;         /* List of child processes. */
     struct list file_list;          /* List of files in use. */
-    struct list_elem elem;          /* List element. */
+    struct process_info *info;      /* Process information for its parent. */
+    int fd_next;                    /* File descriptor tracker. */
+  };
 
+/* An user process information for its parent process. */
+struct process_info
+  {
+    pid_t pid;                      /* Process identifier. */
+    struct process *process;        /* Process. */
     int status;                     /* Process status. */
     int exit_code;                  /* Exit code. */
     bool is_waiting;                /* Whether parent is waiting or not. */
-    int fd_next;                    /* File descriptor tracker. */
+    struct list_elem elem;          /* List element. */
   };
 
 /* A file held by some process. */
@@ -42,7 +49,7 @@ int process_wait (tid_t);
 void process_exit (void);
 void process_activate (void);
 struct process *process_current (void);
-struct process *process_find_child (struct process *proc, pid_t pid);
+struct process_info *process_find_child (struct process *proc, pid_t pid);
 struct file *process_get_file (int fd);
 int process_set_file (struct file * file);
 

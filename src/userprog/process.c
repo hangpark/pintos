@@ -103,9 +103,9 @@ start_process (void *arguments)
   /* Save load result. */
   struct process *curr = process_current ();
   if (success)
-    curr->status |= PROCESS_RUNNING;
+    curr->info->status |= PROCESS_RUNNING;
   else
-    curr->status |= PROCESS_FAIL;
+    curr->info->status |= PROCESS_FAIL;
   curr->exec_file = exec_file;
   curr->fd_next = FD_MIN;
   list_init (&curr->file_list);
@@ -138,7 +138,7 @@ int
 process_wait (tid_t child_tid UNUSED) 
 {
   struct process *curr = process_current ();
-  struct process *child = process_find_child (curr, child_tid);
+  struct process_info *child = process_find_child (curr, child_tid);
 
   if (child == NULL || child->is_waiting)
     return -1;
@@ -146,7 +146,10 @@ process_wait (tid_t child_tid UNUSED)
   while (!(child->status & PROCESS_EXIT))
     thread_yield ();
 
-  return child->exit_code;
+  int exit_code = child->exit_code;
+  list_remove (&child->elem);
+  free (child);
+  return exit_code;
 }
 
 /* Frees the current process's resources. */
@@ -160,14 +163,13 @@ process_exit (void)
   for (e = list_begin (&proc->child_list); e != list_end (&proc->child_list);
        e = list_next (e))
     {
-      struct process *child = list_entry (e, struct process, elem);
+      struct process_info *child = list_entry (e, struct process_info, elem);
       if (!(child->status & PROCESS_EXIT))
-        child->parent = NULL;
+        child->process->parent = NULL;
     }
 
   /* Update the process status and free resources. */
-  proc->status |= PROCESS_EXIT;
-  list_remove (&proc->elem);
+  proc->info->status |= PROCESS_EXIT;
   file_close (proc->exec_file);
   for (e = list_begin (&proc->file_list); e != list_end (&proc->file_list);)
     {
@@ -222,14 +224,14 @@ process_current (void)
 }
 
 /* Returns the child process of the given process with the given pid value. */
-struct process *
+struct process_info *
 process_find_child (struct process *proc, pid_t pid)
 {
   struct list_elem *e;
   for (e = list_begin (&proc->child_list); e != list_end (&proc->child_list);
        e = list_next (e))
     {
-      struct process *child = list_entry (e, struct process, elem);
+      struct process_info *child = list_entry (e, struct process_info, elem);
       if (child->pid == pid)
         return child;
     }
