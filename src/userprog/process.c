@@ -153,7 +153,8 @@ void
 process_exit (void)
 {
   struct process *proc = process_current ();
-  proc->status |= PROCESS_EXIT;
+
+  /* Inform exit to child processes. */
   struct list_elem *e;
   for (e = list_begin (&proc->child_list); e != list_end (&proc->child_list);
        e = list_next (e))
@@ -162,6 +163,10 @@ process_exit (void)
       if (!(child->status & PROCESS_EXIT))
         child->parent = NULL;
     }
+
+  /* Free resources. */
+  proc->status |= PROCESS_EXIT;
+  list_remove (&proc->elem);
 
   struct thread *curr = thread_current ();
   uint32_t *pd;
