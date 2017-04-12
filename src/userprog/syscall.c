@@ -210,7 +210,7 @@ syscall_exec (const char *cmd_line)
   /* Return PID. */
   if (p->status & PROCESS_FAIL)
     return PID_ERROR;
-  return p->pid;
+  return pid;
 }
 
 /* Waits for a child process pid and retrieves the child's exit status. */
