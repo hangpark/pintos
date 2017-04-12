@@ -53,7 +53,7 @@ process_execute (const char *file_name)
   args = (struct arguments *) malloc (sizeof (struct arguments));
   argument_parser (fn_copy, args); 
 
-  /* Create a new thread to execute FILE_NAME. */
+  /* Create a new thread to execute the given file name. */
   pid = (pid_t) thread_create (args->argv[0], PRI_DEFAULT, start_process, args);
   if (pid == TID_ERROR)
     {
@@ -64,8 +64,9 @@ process_execute (const char *file_name)
   return pid;
 }
 
-/* Parse arguments from given string, which removes whole adjacent spaces and replace it  
-   with a null character. And then stores it in given argument struct by pointer. */
+/* Parse arguments from the given string by replacing whole
+   adjacent spaces to the null character. Then store it in
+   given argument struct by pointer. */
 static void
 argument_parser (char *str_input, struct arguments *args)
 {
@@ -129,10 +130,7 @@ start_process (void *arguments)
    exception), returns -1.  If TID is invalid or if it was not a
    child of the calling process, or if process_wait() has already
    been successfully called for the given TID, returns -1
-   immediately, without waiting.
-
-   This function will be implemented in problem 2-2.  For now, it
-   does nothing. */
+   immediately, without waiting. */
 int
 process_wait (tid_t child_tid UNUSED) 
 {
@@ -148,7 +146,7 @@ process_wait (tid_t child_tid UNUSED)
   return child->exit_code;
 }
 
-/* Free the current process's resources. */
+/* Frees the current process's resources. */
 void
 process_exit (void)
 {
@@ -164,7 +162,7 @@ process_exit (void)
         child->parent = NULL;
     }
 
-  /* Free resources. */
+  /* Update the process status and free resources. */
   proc->status |= PROCESS_EXIT;
   list_remove (&proc->elem);
   file_close (proc->exec_file);
@@ -406,6 +404,7 @@ load (struct arguments *args, void (**eip) (void), void **esp,
   if (!setup_stack (esp))
     goto fail;
 
+  /* Push arguments on stack. */
   push_args_on_stack (args, esp);
 
   /* Start address. */

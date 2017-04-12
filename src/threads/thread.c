@@ -12,7 +12,6 @@
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #ifdef USERPROG
-#include "threads/malloc.h"
 #include "userprog/process.h"
 #endif
 
@@ -191,6 +190,7 @@ thread_create (const char *name, int priority,
   struct process *curr_proc = process_current ();
   struct process *new_proc = &t->process;
 
+  /* Initialize process. */
   new_proc->pid = t->tid;
   new_proc->parent = curr_proc;
   new_proc->status = PROCESS_LOADING;

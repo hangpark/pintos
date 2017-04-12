@@ -10,9 +10,7 @@
 
 #define pid_t int
 
-/* A Lock for mutual exclusion between system calls.
-   This lock must be released immediately when a thread is no longer
-   running a code which must be executed in mutually exclueded state. */
+/* A Lock for mutual exclusion between system calls. */
 static struct lock sys_lock;
 
 static int get_byte (const uint8_t *uaddr);
@@ -88,8 +86,7 @@ get_word (const uint32_t *uaddr)
   return res;
 }
 
-/* Handler which matches appropriate handler to system calls.
-   Dispatching handlers with arguments they need. */
+/* Handler which matches the appropriate system call. */
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
 {
@@ -143,11 +140,12 @@ syscall_handler (struct intr_frame *f UNUSED)
       syscall_close ((int) get_word (esp + 1));
       break;
     default:
+      /* Undefined system calls. */
       thread_exit ();
     }
 }
 
-/* Terminate pintos. */
+/* Terminates pintos. */
 static void 
 syscall_halt (void)
 {
@@ -155,11 +153,18 @@ syscall_halt (void)
   NOT_REACHED ();
 }
 
+/* Terminates the current user program, returning status
+   to the kernel. */
 void
 syscall_exit (int status)
 {
+  /* Set exit code. */
   process_current ()->exit_code = status;
+
+  /* Print the termination message. */
   printf ("%s: exit(%d)\n", thread_current ()->name, status);
+
+  /* Exit the current thread. */
   thread_exit ();
   NOT_REACHED ();
 }
