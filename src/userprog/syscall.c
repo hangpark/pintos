@@ -295,10 +295,44 @@ syscall_filesize (int fd)
   return size;
 }
 
+/* Reads size bytes from the file open as fd into buffer.
+   Returns the number of bytes actually read, or -1
+   if the file could not be read. */
 static int 
 syscall_read (int fd, void *buffer, unsigned size)
 {
-  return 0;
+  /* Check the validity. */
+  validate_ptr (buffer);
+  uint8_t *bf = (uint8_t *) buffer;
+
+  /* Read from STDIN. */
+  int bytes = 0;
+  if (fd == STDIN_FILENO)
+    {
+      uint8_t b;
+      while (bytes < size && (b = input_getc ()) != 0)
+        {
+          *bf++ = b;
+          bytes ++;
+        }
+      return bytes;
+    }
+
+  /* Get the file. */
+  lock_acquire (&filesys_lock);
+  struct file *file = process_get_file (fd);
+  if (file == NULL)
+    {
+      lock_release (&filesys_lock);
+      return -1;
+    }
+
+  /* Read from the file. */
+  bytes = file_read (file, buffer, size);
+
+  /* Return bytes read. */
+  lock_release (&filesys_lock);
+  return bytes;
 }
 
 static int 
