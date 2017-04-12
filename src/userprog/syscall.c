@@ -249,10 +249,29 @@ syscall_remove (const char *file)
   return success;
 }
 
+/* Opens the file. Returns a nonnegative integer handle,
+   a file descriptor, or -1 if the file could not be opened. */
 static int 
 syscall_open (const char *file)
 {
-  return 0;
+  /* Check the validity. */
+  validate_ptr (file);
+
+  /* Open the file. */
+  lock_acquire (&filesys_lock);
+  struct file *f = filesys_open (file);
+  if (f == NULL)
+    {
+      lock_release (&filesys_lock);
+      return -1;
+    }
+
+  /* Set the file. */
+  int fd = process_set_file (f);
+
+  /* Return the file descriptor. */
+  lock_release (&filesys_lock);
+  return fd;
 }
 
 static int 
