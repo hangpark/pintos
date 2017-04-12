@@ -309,10 +309,24 @@ syscall_write (int fd, void *buffer, unsigned size)
   return size;
 }
 
+/* Changes the next byte to be read or written in open file fd
+   to position, expressed in bytes from the beginning of the file. */
 static void 
 syscall_seek (int fd, unsigned position)
 {
+  /* Open the file. */
+  lock_acquire (&filesys_lock);
+  struct file *file = process_get_file (fd);
+  if (file == NULL)
+    {
+      lock_release (&filesys_lock);
+      return;
+    }
 
+  /* Seek the file. */
+  file_seek (file, position);
+
+  lock_release (&filesys_lock);
 }
 
 static unsigned 
