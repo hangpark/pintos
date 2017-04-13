@@ -174,7 +174,8 @@ void
 syscall_exit (int status)
 {
   /* Set exit code. */
-  process_current ()->info->exit_code = status;
+  if (process_current ()->info != NULL)
+    process_current ()->info->exit_code = status;
 
   /* Print the termination message. */
   printf ("%s: exit(%d)\n", thread_current ()->name, status);
