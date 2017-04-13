@@ -128,7 +128,6 @@ start_process (void *arguments)
     }
   curr->exec_file = exec_file;
   curr->fd_next = FD_MIN;
-  list_init (&curr->file_list);
 
   /* Free resources. */
   palloc_free_page (args->argv[0]);
