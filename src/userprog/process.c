@@ -14,16 +14,16 @@
 #include "threads/flags.h"
 #include "threads/init.h"
 #include "threads/interrupt.h"
+#include "threads/malloc.h"
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
-#include "threads/malloc.h"
 
 #define FD_MIN 2            /* Min value for file descriptors. */
 
 /* Structure for arguments. */
 struct arguments
-  { 
+  {
     int argc;               /* Number of arguments. */
     char **argv;            /* Array of arguments. */
   };
@@ -38,10 +38,10 @@ static bool load (struct arguments *args, void (**eip) (void), void **esp,
    before process_execute() returns.  Returns the new process's
    thread id, or TID_ERROR if the thread cannot be created. */
 pid_t
-process_execute (const char *file_name) 
+process_execute (const char *file_name)
 {
   char *fn_copy;
-  struct arguments *args;   
+  struct arguments *args;
   pid_t pid;
 
   /* Make a copy of FILE_NAME.
@@ -66,7 +66,7 @@ process_execute (const char *file_name)
     {
       palloc_free_page (args->argv);
       free(args);
-      palloc_free_page (fn_copy); 
+      palloc_free_page (fn_copy);
     }
   return pid;
 }
@@ -149,17 +149,16 @@ start_process (void *arguments)
   NOT_REACHED ();
 }
 
-/* Waits for thread TID to die and returns its exit status.  If
+/* Waits for thread PID to die and returns its exit status.  If
    it was terminated by the kernel (i.e. killed due to an
-   exception), returns -1.  If TID is invalid or if it was not a
+   exception), returns -1.  If PID is invalid or if it was not a
    child of the calling process, or if process_wait() has already
-   been successfully called for the given TID, returns -1
+   been successfully called for the given PID, returns -1
    immediately, without waiting. */
 int
-process_wait (tid_t child_tid UNUSED) 
+process_wait (pid_t child_pid)
 {
-  struct process *curr = process_current ();
-  struct process_info *child = process_find_child (curr, child_tid);
+  struct process_info *child = process_find_child (child_pid);
 
   if (child == NULL || child->is_waiting)
     return -1;
@@ -211,7 +210,7 @@ process_exit (void)
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = curr->pagedir;
-  if (pd != NULL) 
+  if (pd != NULL)
     {
       /* Correct ordering here is crucial.  We must set
          cur->pagedir to NULL before switching page directories,
@@ -249,13 +248,14 @@ process_current (void)
   return &thread_current ()->process;
 }
 
-/* Returns the child process of the given process with the given pid value. */
+/* Returns the child process of the current process
+   with the given pid value. */
 struct process_info *
-process_find_child (struct process *proc, pid_t pid)
+process_find_child (pid_t pid)
 {
+  struct list *list = &process_current ()->child_list;
   struct list_elem *e;
-  for (e = list_begin (&proc->child_list); e != list_end (&proc->child_list);
-       e = list_next (e))
+  for (e = list_begin (list); e != list_end (list); e = list_next (e))
     {
       struct process_info *child = list_entry (e, struct process_info, elem);
       if (child->pid == pid)
@@ -375,7 +375,7 @@ static void *push_args_on_stack(struct arguments *args);
    Returns true if successful, false otherwise. */
 bool
 load (struct arguments *args, void (**eip) (void), void **esp,
-      struct file **exec_file) 
+      struct file **exec_file)
 {
   struct thread *t = thread_current ();
   struct Elf32_Ehdr ehdr;
@@ -386,13 +386,13 @@ load (struct arguments *args, void (**eip) (void), void **esp,
 
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
-  if (t->pagedir == NULL) 
+  if (t->pagedir == NULL)
     goto fail;
   process_activate ();
 
   /* Open executable file. */
   file = filesys_open (file_name);
-  if (file == NULL) 
+  if (file == NULL)
     {
       printf ("load: %s: open failed\n", file_name);
       goto fail;
@@ -408,7 +408,7 @@ load (struct arguments *args, void (**eip) (void), void **esp,
       || ehdr.e_machine != 3
       || ehdr.e_version != 1
       || ehdr.e_phentsize != sizeof (struct Elf32_Phdr)
-      || ehdr.e_phnum > 1024) 
+      || ehdr.e_phnum > 1024)
     {
       printf ("load: %s: error loading executable\n", file_name);
       goto fail;
@@ -416,7 +416,7 @@ load (struct arguments *args, void (**eip) (void), void **esp,
 
   /* Read program headers. */
   file_ofs = ehdr.e_phoff;
-  for (i = 0; i < ehdr.e_phnum; i++) 
+  for (i = 0; i < ehdr.e_phnum; i++)
     {
       struct Elf32_Phdr phdr;
 
@@ -427,7 +427,7 @@ load (struct arguments *args, void (**eip) (void), void **esp,
       if (file_read (file, &phdr, sizeof phdr) != sizeof phdr)
         goto fail;
       file_ofs += sizeof phdr;
-      switch (phdr.p_type) 
+      switch (phdr.p_type)
         {
         case PT_NULL:
         case PT_NOTE:
@@ -441,7 +441,7 @@ load (struct arguments *args, void (**eip) (void), void **esp,
         case PT_SHLIB:
           goto fail;
         case PT_LOAD:
-          if (validate_segment (&phdr, file)) 
+          if (validate_segment (&phdr, file))
             {
               bool writable = (phdr.p_flags & PF_W) != 0;
               uint32_t file_page = phdr.p_offset & ~PGMASK;
@@ -456,7 +456,7 @@ load (struct arguments *args, void (**eip) (void), void **esp,
                   zero_bytes = (ROUND_UP (page_offset + phdr.p_memsz, PGSIZE)
                                 - read_bytes);
                 }
-              else 
+              else
                 {
                   /* Entirely zero.
                      Don't read anything from disk. */
@@ -498,24 +498,24 @@ static bool install_page (void *upage, void *kpage, bool writable);
 /* Checks whether PHDR describes a valid, loadable segment in
    FILE and returns true if so, false otherwise. */
 static bool
-validate_segment (const struct Elf32_Phdr *phdr, struct file *file) 
+validate_segment (const struct Elf32_Phdr *phdr, struct file *file)
 {
   /* p_offset and p_vaddr must have the same page offset. */
-  if ((phdr->p_offset & PGMASK) != (phdr->p_vaddr & PGMASK)) 
-    return false; 
+  if ((phdr->p_offset & PGMASK) != (phdr->p_vaddr & PGMASK))
+    return false;
 
   /* p_offset must point within FILE. */
-  if (phdr->p_offset > (Elf32_Off) file_length (file)) 
+  if (phdr->p_offset > (Elf32_Off) file_length (file))
     return false;
 
   /* p_memsz must be at least as big as p_filesz. */
-  if (phdr->p_memsz < phdr->p_filesz) 
-    return false; 
+  if (phdr->p_memsz < phdr->p_filesz)
+    return false;
 
   /* The segment must not be empty. */
   if (phdr->p_memsz == 0)
     return false;
-  
+
   /* The virtual memory region must both start and end within the
      user address space range. */
   if (!is_user_vaddr ((void *) phdr->p_vaddr))
@@ -556,14 +556,14 @@ validate_segment (const struct Elf32_Phdr *phdr, struct file *file)
    or disk read error occurs. */
 static bool
 load_segment (struct file *file, off_t ofs, uint8_t *upage,
-              uint32_t read_bytes, uint32_t zero_bytes, bool writable) 
+              uint32_t read_bytes, uint32_t zero_bytes, bool writable)
 {
   ASSERT ((read_bytes + zero_bytes) % PGSIZE == 0);
   ASSERT (pg_ofs (upage) == 0);
   ASSERT (ofs % PGSIZE == 0);
 
   file_seek (file, ofs);
-  while (read_bytes > 0 || zero_bytes > 0) 
+  while (read_bytes > 0 || zero_bytes > 0)
     {
       /* Do calculate how to fill this page.
          We will read PAGE_READ_BYTES bytes from FILE
@@ -580,15 +580,15 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
         {
           palloc_free_page (kpage);
-          return false; 
+          return false;
         }
       memset (kpage + page_read_bytes, 0, page_zero_bytes);
 
       /* Add the page to the process's address space. */
-      if (!install_page (upage, kpage, writable)) 
+      if (!install_page (upage, kpage, writable))
         {
           palloc_free_page (kpage);
-          return false; 
+          return false;
         }
 
       /* Advance. */
@@ -608,7 +608,7 @@ setup_stack (struct arguments *args, void **esp)
   bool success = false;
 
   kpage = palloc_get_page (PAL_USER | PAL_ZERO);
-  if (kpage != NULL) 
+  if (kpage != NULL)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
@@ -663,7 +663,7 @@ push_args_on_stack(struct arguments *args)
       memcpy (curr8, args->argv[i], arg_len);
       arg_ptrs[i] = (uint32_t *) curr8;
     }
-  
+
   /* Align, and push bytes required for aligning. */
   int alignment = ((uint32_t) curr8) % sizeof (uintptr_t);
   for (i = 0; i < alignment ; i++)
@@ -676,10 +676,11 @@ push_args_on_stack(struct arguments *args)
   /* Push a pointer to argv[argc-1], argv[argc-2] ...
      until a pointer to argv[0] is pushed. */
   for (i = args->argc - 1; i >= 0; i--)
-    *--curr32 = arg_ptrs[i];
+    *--curr32 = (uint32_t) arg_ptrs[i];
 
   /* Push address of argv on stack. */
-  *--curr32 = (uint32_t) (curr32 + 1);
+  --curr32;
+  *curr32 = (uint32_t) (curr32 + 1);
 
   /* Push argument count on stack. */
   *--curr32 = (uint32_t) args->argc;

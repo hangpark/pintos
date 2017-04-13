@@ -2,10 +2,14 @@
 #include <stdio.h>
 #include <syscall-nr.h>
 #include <debug.h>
-#include "threads/interrupt.h"
-#include "threads/thread.h"
-#include "threads/synch.h"
+#include "devices/input.h"
+#include "filesys/file.h"
+#include "filesys/filesys.h"
 #include "threads/init.h"
+#include "threads/interrupt.h"
+#include "threads/malloc.h"
+#include "threads/synch.h"
+#include "threads/thread.h"
 #include "threads/vaddr.h"
 
 #define pid_t int
@@ -14,7 +18,6 @@
 static struct lock filesys_lock;
 
 static int get_byte (const uint8_t *uaddr);
-static bool put_byte (uint8_t *udst, uint8_t byte);
 static uint32_t get_word (const uint32_t *uaddr);
 static void validate_ptr (const uint8_t *uaddr);
 
@@ -34,7 +37,7 @@ static unsigned syscall_tell (int fd);
 static void syscall_close (int fd);
 
 void
-syscall_init (void) 
+syscall_init (void)
 {
   lock_init(&filesys_lock);
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
@@ -52,20 +55,6 @@ get_byte (const uint8_t *uaddr)
   asm ("movl $1f, %0; movzbl %1, %0; 1:"
        : "=&a" (result) : "m" (*uaddr));
   return result;
-}
-
-/* Writes BYTE to user address UDST.
-   Returns true if successful, false if a segfault occured
-   or UDST is not in the user space. */
-static bool
-put_byte (uint8_t *udst, uint8_t byte)
-{
-  if (!is_user_vaddr (udst))
-    return false;
-  int error_code;
-  asm ("movl $1f, %0; movb %b2, %1; 1:"
-       : "=&a" (error_code), "=m" (*udst) : "q" (byte));
-  return error_code != -1;
 }
 
 /* Reads a word at user virtual address ADDR.
@@ -103,7 +92,7 @@ validate_ptr (const uint8_t *uaddr)
 
 /* Handler which matches the appropriate system call. */
 static void
-syscall_handler (struct intr_frame *f UNUSED) 
+syscall_handler (struct intr_frame *f UNUSED)
 {
   uint32_t *esp = f->esp;
 
@@ -161,7 +150,7 @@ syscall_handler (struct intr_frame *f UNUSED)
 }
 
 /* Terminates pintos. */
-static void 
+static void
 syscall_halt (void)
 {
   power_off ();
@@ -187,8 +176,8 @@ syscall_exit (int status)
 
 /* Runs the executable whose name is given in cmd_line,
    passing any given arguments, and returns the new process's
-   process id (pid). */
-static pid_t 
+   process id. */
+static pid_t
 syscall_exec (const char *cmd_line)
 {
   /* Check the validity. */
@@ -200,7 +189,7 @@ syscall_exec (const char *cmd_line)
     return pid;
 
   /* Obtain the new process. */
-  struct process_info *child = process_find_child (process_current (), pid);
+  struct process_info *child = process_find_child (pid);
   if (child == NULL)
     return PID_ERROR;
 
@@ -214,8 +203,8 @@ syscall_exec (const char *cmd_line)
   return pid;
 }
 
-/* Waits for a child process pid and retrieves the child's exit status. */
-static int 
+/* Waits for a child process PID and retrieves the child's exit status. */
+static int
 syscall_wait (pid_t pid)
 {
   return process_wait (pid);
@@ -223,7 +212,7 @@ syscall_wait (pid_t pid)
 
 /* Creates a new file initially the given bytes in size.
    Returns true if successful, false otherwise. */
-static bool 
+static bool
 syscall_create (const char *file, unsigned init_size)
 {
   /* Check the validity. */
@@ -237,7 +226,7 @@ syscall_create (const char *file, unsigned init_size)
 }
 
 /* Deletes the file. Returns true if successful, false otherwise. */
-static bool 
+static bool
 syscall_remove (const char *file)
 {
   /* Check the validity. */
@@ -252,7 +241,7 @@ syscall_remove (const char *file)
 
 /* Opens the file. Returns a nonnegative integer handle,
    a file descriptor, or -1 if the file could not be opened. */
-static int 
+static int
 syscall_open (const char *file)
 {
   /* Check the validity. */
@@ -276,7 +265,7 @@ syscall_open (const char *file)
 }
 
 /* Returns the size, in bytes, of the file open as fd. */
-static int 
+static int
 syscall_filesize (int fd)
 {
   /* Open the file. */
@@ -299,7 +288,7 @@ syscall_filesize (int fd)
 /* Reads size bytes from the file open as fd into buffer.
    Returns the number of bytes actually read, or -1
    if the file could not be read. */
-static int 
+static int
 syscall_read (int fd, void *buffer, unsigned size)
 {
   /* Check the validity. */
@@ -307,7 +296,7 @@ syscall_read (int fd, void *buffer, unsigned size)
   uint8_t *bf = (uint8_t *) buffer;
 
   /* Read from STDIN. */
-  int bytes = 0;
+  unsigned bytes = 0;
   if (fd == STDIN_FILENO)
     {
       uint8_t b;
@@ -316,7 +305,7 @@ syscall_read (int fd, void *buffer, unsigned size)
           *bf++ = b;
           bytes ++;
         }
-      return bytes;
+      return (int) bytes;
     }
 
   /* Get the file. */
@@ -333,12 +322,12 @@ syscall_read (int fd, void *buffer, unsigned size)
 
   /* Return bytes read. */
   lock_release (&filesys_lock);
-  return bytes;
+  return (int) bytes;
 }
 
 /* Writes size bytes from buffer to the open file fd.
    Returns the number of bytes actually written. */
-static int 
+static int
 syscall_write (int fd, void *buffer, unsigned size)
 {
   /* Check the validity. */
@@ -370,7 +359,7 @@ syscall_write (int fd, void *buffer, unsigned size)
 
 /* Changes the next byte to be read or written in open file fd
    to position, expressed in bytes from the beginning of the file. */
-static void 
+static void
 syscall_seek (int fd, unsigned position)
 {
   /* Open the file. */
@@ -391,7 +380,7 @@ syscall_seek (int fd, unsigned position)
 /* Returns the position of the next byte to be read or written
    in open file fd, expressed in bytes from the beginning
    of the file. */
-static unsigned 
+static unsigned
 syscall_tell (int fd)
 {
   /* Open the file. */
@@ -412,7 +401,7 @@ syscall_tell (int fd)
 }
 
 /* Closes file descriptor. */
-static void 
+static void
 syscall_close (int fd)
 {
   lock_acquire (&filesys_lock);

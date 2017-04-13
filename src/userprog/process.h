@@ -45,11 +45,11 @@ struct process_file
   };
 
 pid_t process_execute (const char *file_name);
-int process_wait (tid_t);
+int process_wait (pid_t pid);
 void process_exit (void);
 void process_activate (void);
 struct process *process_current (void);
-struct process_info *process_find_child (struct process *proc, pid_t pid);
+struct process_info *process_find_child (pid_t pid);
 struct file *process_get_file (int fd);
 int process_set_file (struct file * file);
 
