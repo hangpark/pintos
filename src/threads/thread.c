@@ -197,7 +197,10 @@ thread_create (const char *name, int priority,
 
   new_proc_info = (struct process_info *) malloc (sizeof (struct process_info));
   if (new_proc_info == NULL)
-    return TID_ERROR;
+    {
+      palloc_free_page (t);
+      return TID_ERROR;
+    }
 
   new_proc->info = new_proc_info;
   new_proc_info->pid = (pid_t) t->tid;

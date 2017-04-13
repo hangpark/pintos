@@ -28,10 +28,10 @@ struct arguments
     char **argv;            /* Array of arguments. */
   };
 
+static struct arguments *parse_arguments(char *str_input);
 static thread_func start_process NO_RETURN;
 static bool load (struct arguments *args, void (**eip) (void), void **esp,
                   struct file **exec_file);
-static void argument_parser(char *str, struct arguments *args);
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -51,36 +51,53 @@ process_execute (const char *file_name)
     return PID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
-  /* Parse argument into the structure. */
-  args = (struct arguments *) malloc (sizeof (struct arguments));
-  argument_parser (fn_copy, args); 
+  /* Parse arguments into the structure. */
+  args = parse_arguments (fn_copy);
+  if (args == NULL)
+    {
+      free (args);
+      palloc_free_page (fn_copy);
+      return PID_ERROR;
+    }
 
   /* Create a new thread to execute the given file name. */
   pid = (pid_t) thread_create (args->argv[0], PRI_DEFAULT, start_process, args);
   if (pid == TID_ERROR)
     {
-      free(args->argv);
+      palloc_free_page (args->argv);
       free(args);
       palloc_free_page (fn_copy); 
     }
   return pid;
 }
 
-/* Parse arguments from the given string by replacing whole
-   adjacent spaces to the null character. Then store it in
-   given argument struct by pointer. */
-static void
-argument_parser (char *str_input, struct arguments *args)
+/* Parses arguments from the given string by replacing whole
+   adjacent spaces to the null character. Then stores it in
+   given arguments struct. Returns the pointer of arguments
+   struct if successful, NULL otherwise. */
+static struct arguments *
+parse_arguments (char *str_input)
 {
+  struct arguments *args;
   char *leftover;
   char *curr;
 
+  args = (struct arguments *) malloc (sizeof (struct arguments));
+  if (args == NULL)
+    return NULL;
+
   args->argc = 0;
-  args->argv = (char **) calloc (strlen (str_input) + 1, sizeof (char));
-  
+  args->argv = (char **) palloc_get_page (0);
+  if (args->argv == NULL)
+    {
+      free (args);
+      return NULL;
+    }
+
   for (curr = strtok_r (str_input, " ", &leftover); curr != NULL;
        curr = strtok_r (NULL, " ", &leftover))
      args->argv[args->argc ++] = curr;
+  return args;
 }
 
 /* A thread function that loads a user process and makes it start
@@ -89,7 +106,7 @@ static void
 start_process (void *arguments)
 {
   struct arguments *args = arguments;
-  struct file *exec_file;
+  struct file *exec_file = NULL;
   struct intr_frame if_;
   bool success;
 
@@ -102,21 +119,25 @@ start_process (void *arguments)
 
   /* Save load result. */
   struct process *curr = process_current ();
-  if (success)
-    curr->info->status |= PROCESS_RUNNING;
-  else
-    curr->info->status |= PROCESS_FAIL;
+  if (curr->info != NULL)
+    {
+      if (success)
+        curr->info->status |= PROCESS_RUNNING;
+      else
+        curr->info->status |= PROCESS_FAIL;
+    }
   curr->exec_file = exec_file;
   curr->fd_next = FD_MIN;
   list_init (&curr->file_list);
 
-  /* If load failed, quit. */ 
+  /* Free resources. */
+  palloc_free_page (args->argv[0]);
+  palloc_free_page (args->argv);
+  free (args);
+
+  /* If load failed, quit. */
   if (!success)
-    {
-      free(args->argv);
-      free(args);
-      thread_exit ();
-    }
+    thread_exit ();
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -160,16 +181,21 @@ process_exit (void)
 
   /* Inform exit to child processes. */
   struct list_elem *e;
-  for (e = list_begin (&proc->child_list); e != list_end (&proc->child_list);
-       e = list_next (e))
+  for (e = list_begin (&proc->child_list); e != list_end (&proc->child_list);)
     {
       struct process_info *child = list_entry (e, struct process_info, elem);
       if (!(child->status & PROCESS_EXIT))
-        child->process->parent = NULL;
+        {
+          child->process->parent = NULL;
+          child->process->info = NULL;
+        }
+      e = list_next (e);
+      free (child);
     }
 
   /* Update the process status and free resources. */
-  proc->info->status |= PROCESS_EXIT;
+  if (proc->info != NULL)
+    proc->info->status |= PROCESS_EXIT;
   file_close (proc->exec_file);
   for (e = list_begin (&proc->file_list); e != list_end (&proc->file_list);)
     {
@@ -336,12 +362,12 @@ struct Elf32_Phdr
 #define PF_W 2          /* Writable. */
 #define PF_R 4          /* Readable. */
 
-static bool setup_stack (void **esp);
+static bool setup_stack (struct arguments *args, void **esp);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
                           bool writable);
-static void push_args_on_stack(struct arguments *args, void **esp);
+static void *push_args_on_stack(struct arguments *args);
 
 /* Loads an ELF executable from FILE_NAME into the current thread.
    Stores the executable's entry point into *EIP
@@ -448,11 +474,8 @@ load (struct arguments *args, void (**eip) (void), void **esp,
     }
 
   /* Set up stack. */
-  if (!setup_stack (esp))
+  if (!setup_stack (args, esp))
     goto fail;
-
-  /* Push arguments on stack. */
-  push_args_on_stack (args, esp);
 
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
@@ -579,7 +602,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
 static bool
-setup_stack (void **esp) 
+setup_stack (struct arguments *args, void **esp)
 {
   uint8_t *kpage;
   bool success = false;
@@ -589,8 +612,12 @@ setup_stack (void **esp)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
-        *esp = PHYS_BASE;
-      else
+        {
+          *esp = push_args_on_stack (args);
+          if (*esp == NULL)
+            success = false;
+        }
+      if (!success)
         palloc_free_page (kpage);
     }
   return success;
@@ -616,14 +643,15 @@ install_page (void *upage, void *kpage, bool writable)
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
 }
 
-/* Push arguments on newly initialized stack, following calling conventions.
-   This invention does not use esp dynamically, just making it point bottom of 
-   stack frame after all push is done.*/
-static void
-push_args_on_stack(struct arguments *args, void **esp)
+/* Push arguments on newly initialized stack. Returns pointer
+   that ESP should point to if successful, NULL otherwise. */
+static void *
+push_args_on_stack(struct arguments *args)
 {
   uint32_t **arg_ptrs = (uint32_t **) calloc (args->argc, sizeof (uint32_t *));
-  uint8_t *curr8 = (uint8_t *) *esp;
+  if (arg_ptrs == NULL)
+    return NULL;
+  uint8_t *curr8 = (uint8_t *) PHYS_BASE;
   int i;
 
   /* Push arguments on stack, save their address in arg_ptrs. */
@@ -649,7 +677,6 @@ push_args_on_stack(struct arguments *args, void **esp)
      until a pointer to argv[0] is pushed. */
   for (i = args->argc - 1; i >= 0; i--)
     *--curr32 = arg_ptrs[i];
-  free (arg_ptrs);
 
   /* Push address of argv on stack. */
   *--curr32 = (uint32_t) (curr32 + 1);
@@ -660,6 +687,7 @@ push_args_on_stack(struct arguments *args, void **esp)
   /* Push return address as 0 values. */
   *--curr32 = 0;
 
-  /* ESP pointing bottom of the stack. */
-  *esp = (void *) curr32;
+  /* Return result. */
+  free (arg_ptrs);
+  return curr32;
 }
