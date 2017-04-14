@@ -11,8 +11,7 @@
 #include "threads/synch.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
-
-#define pid_t int
+#include "userprog/process.h"
 
 /* A Lock for mutual exclusion between system calls. */
 static struct lock filesys_lock;
