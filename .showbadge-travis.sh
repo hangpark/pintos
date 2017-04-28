@@ -31,6 +31,11 @@ echo "  Key          $1"
 echo "  Value        $2"
 echo ""
 
+# Purge caching
+if [ -n "$SHOWBADGE_CAMO" ]; then
+  curl -X PURGE $SHOWBADGE_CAMO
+fi
+
 # Send data
 curl -X POST -d "commit=$TRAVIS_COMMIT&key=$1&value=$2" \
   ${SHOWBADGE_SERVER%%/}/$TRAVIS_REPO_SLUG/
