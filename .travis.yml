@@ -17,4 +17,5 @@ script:
   - docker run -v $TRAVIS_BUILD_DIR:/pintos hangpark/pintos-dev-env-kaist /bin/bash -c "cd /pintos/src/$TARGET_DIRECTORY && make grade" > /dev/null
 
 after_success:
+  - ./.showbadge-travis.sh grade `sed -n 's/^Total:\ \([0-9.]\+\)%\/\([0-9.]\+\)%$/\1\/\2/p' src/$TARGET_DIRECTORY/build/grade`
   - cat src/$TARGET_DIRECTORY/build/grade
