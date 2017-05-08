@@ -51,6 +51,6 @@ void process_activate (void);
 struct process *process_current (void);
 struct process_info *process_find_child (pid_t pid);
 struct file *process_get_file (int fd);
-int process_set_file (struct file * file);
+int process_set_file (struct file *file);
 
 #endif /* userprog/process.h */
