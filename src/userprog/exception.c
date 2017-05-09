@@ -8,6 +8,8 @@
 #include "userprog/gdt.h"
 #include "userprog/syscall.h"
 
+#define STACK_LIMIT 0x40000000
+
 /* Number of page faults processed. */
 static long long page_fault_cnt;
 
@@ -157,6 +159,12 @@ page_fault (struct intr_frame *f)
   /* Only deal with a fault caused by a non-present page.
      See [IA32-v3a] 6-41 for more information. */
   if (!not_present)
+    goto page_level_protection_violation;
+
+  /* Stack growth. */
+  uint32_t *esp = user ? f->esp : thread_current ()->esp;
+  if (STACK_LIMIT <= fault_addr && fault_addr < PHYS_BASE
+      && esp - 16 <= fault_addr && !suppl_pt_set_zero (upage))
     goto page_level_protection_violation;
 
   /* Load page from appropriate source. */
