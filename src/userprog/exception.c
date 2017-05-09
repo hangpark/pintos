@@ -1,11 +1,12 @@
 #include "userprog/exception.h"
+#include <debug.h>
 #include <inttypes.h>
 #include <stdio.h>
-#include <debug.h>
-#include "userprog/gdt.h"
-#include "userprog/syscall.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
+#include "userprog/gdt.h"
+#include "userprog/syscall.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -150,6 +151,20 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
+#ifdef VM
+  void *upage = pg_round_down (fault_addr);
+
+  /* Only deal with a fault caused by a non-present page.
+     See [IA32-v3a] 6-41 for more information. */
+  if (!not_present)
+    goto page_level_protection_violation;
+
+  /* Load page from appropriate source. */
+  if (suppl_pt_load_page (upage))
+    return;
+#endif
+
+ page_level_protection_violation:
   /* Change EIP to the next instruction address which is saved on
      EAX, and set EAX by -1 to return the failure code. */
   if (!user)
