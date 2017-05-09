@@ -110,6 +110,7 @@ struct thread
     struct process process;             /* User process. */
     uint32_t *pagedir;                  /* Page directory. */
     struct suppl_pt *suppl_pt;          /* Suppplemental page table. */
+    uint32_t *esp;                      /* Stack pointer. */
 #endif
 
     /* Owned by thread.c. */
