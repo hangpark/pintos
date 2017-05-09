@@ -6,6 +6,7 @@
 
 void frame_table_init (void);
 void *frame_alloc (enum palloc_flags);
-void frame_free (void *);
+void frame_free (void *kpage);
+void frame_remove (void *kpage);
 
 #endif /* vm/frame.h */

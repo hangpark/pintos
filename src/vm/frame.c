@@ -58,13 +58,10 @@ frame_alloc (enum palloc_flags flags)
   return kpage;
 }
 
-/* Frees the given frame at kpage.
-   If such frame exists in the frame table, remove it. */
-void
-frame_free (void *kpage)
-{
-  lock_acquire (&frame_table_lock);
 
+static struct frame *
+frame_search (void *kpage)
+{
   struct frame *f = NULL;
   struct list_elem *e;
   for (e = list_begin (&frame_table); e != list_end (&frame_table);
@@ -78,12 +75,38 @@ frame_free (void *kpage)
         }
     }
 
+  return f;
+}
+
+/* Frees the given frame at kpage.
+   If such frame exists in the frame table, remove it. */
+void
+frame_free (void *kpage)
+{
+  lock_acquire (&frame_table_lock);
+
+  struct frame *f = frame_search (kpage);
   if (f != NULL)
     {
       list_remove (&f->elem);
       free (f);
     }
   palloc_free_page (kpage);
+
+  lock_release (&frame_table_lock);
+}
+
+void
+frame_remove (void *kpage)
+{
+  lock_acquire (&frame_table_lock);
+
+  struct frame *f = frame_search (kpage);
+  if (f != NULL)
+    {
+      list_remove (&f->elem);
+      free (f);
+    }
 
   lock_release (&frame_table_lock);
 }

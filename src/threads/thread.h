@@ -7,6 +7,9 @@
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
+#ifdef VM
+#include "vm/page.h"
+#endif
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -106,6 +109,7 @@ struct thread
     /* Owned by userprog/process.c. */
     struct process process;             /* User process. */
     uint32_t *pagedir;                  /* Page directory. */
+    struct suppl_pt *suppl_pt;          /* Suppplemental page table. */
 #endif
 
     /* Owned by thread.c. */

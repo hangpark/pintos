@@ -20,6 +20,7 @@
 #include "threads/vaddr.h"
 #ifdef VM
 #include "vm/frame.h"
+#include "vm/page.h"
 #endif
 
 #define FD_MIN 2            /* Min value for file descriptors. */
@@ -207,7 +208,13 @@ process_exit (void)
     }
 
   struct thread *curr = thread_current ();
+  struct suppl_pt *pt;
   uint32_t *pd;
+
+  /* Destroy the current process's supplemental page table. */
+  pt = curr->suppl_pt;
+  if (pt != NULL)
+    suppl_pt_destroy (pt);
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -392,6 +399,11 @@ load (struct arguments *args, void (**eip) (void), void **esp,
     goto fail;
   process_activate ();
 
+  /* Allocate supplemental page table. */
+  t->suppl_pt = suppl_pt_create ();
+  if (t->suppl_pt == NULL)
+    goto fail;
+
   /* Open executable file. */
   file = filesys_open (file_name);
   if (file == NULL)
@@ -573,23 +585,20 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
-      /* Get a page of memory. */
 #ifdef VM
-      uint8_t *kpage = frame_alloc (PAL_USER);
+      if (!suppl_pt_set_file (upage, file, ofs, page_read_bytes,
+                              page_zero_bytes, writable))
+        return false;
 #else
+      /* Get a page of memory. */
       uint8_t *kpage = palloc_get_page (PAL_USER);
-#endif
       if (kpage == NULL)
         return false;
 
       /* Load this page. */
       if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
         {
-#ifdef VM
-          frame_free (kpage);
-#else
           palloc_free_page (kpage);
-#endif
           return false;
         }
       memset (kpage + page_read_bytes, 0, page_zero_bytes);
@@ -597,18 +606,18 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       /* Add the page to the process's address space. */
       if (!install_page (upage, kpage, writable))
         {
-#ifdef VM
-          frame_free (kpage);
-#else
           palloc_free_page (kpage);
-#endif
           return false;
         }
+#endif
 
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
       upage += PGSIZE;
+#ifdef VM
+      ofs += PGSIZE;
+#endif
     }
   return true;
 }
@@ -618,14 +627,21 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 static bool
 setup_stack (struct arguments *args, void **esp)
 {
+#ifdef VM
+  if (!suppl_pt_set_zero (PHYS_BASE - PGSIZE))
+    return false;
+  *esp = push_args_on_stack (args);
+  if (*esp == NULL)
+    {
+      suppl_pt_clear_page (PHYS_BASE - PGSIZE);
+      return false;
+    }
+  return true;
+#else
   uint8_t *kpage;
   bool success = false;
 
-#ifdef VM
-  kpage = frame_alloc (PAL_USER | PAL_ZERO);
-#else
   kpage = palloc_get_page (PAL_USER | PAL_ZERO);
-#endif
   if (kpage != NULL)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
@@ -636,13 +652,10 @@ setup_stack (struct arguments *args, void **esp)
             success = false;
         }
       if (!success)
-#ifdef VM
-        frame_free (kpage);
-#else
         palloc_free_page (kpage);
-#endif
     }
   return success;
+#endif
 }
 
 /* Adds a mapping from user virtual address UPAGE to kernel
