@@ -57,4 +57,6 @@ bool suppl_pt_load_page (void *upage);
 struct suppl_pte *suppl_pt_get_page (void *upage);
 void suppl_pt_clear_page (void *upage);
 
+bool suppl_pt_update_dirty (struct suppl_pte *);
+
 #endif /* vm/page.h */
