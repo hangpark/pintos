@@ -9,7 +9,6 @@
 #include "vm/swap.h"
 
 static void suppl_pt_free_pte (struct suppl_pte *);
-static void *suppl_pt_evict (void);
 
 /* Creates and returns a new supplemental page table. */
 struct suppl_pt *
