@@ -148,6 +148,9 @@ suppl_pt_load_page (void *upage)
       return false;
     }
 
+  /* Set dirty value of kernel page to false. */
+  pagedir_set_dirty (pte->pagedir, kpage, false);
+
   /* Append result to supplemental page table. */
   pte->kpage = kpage;
 
@@ -170,7 +173,7 @@ suppl_pt_clear_page (void *upage)
    user virtual page UPAGE.
    Returns NULL if not exist. */
 struct suppl_pte *
-suppl_pt_get_page(void *upage)
+suppl_pt_get_page (void *upage)
 {
   struct suppl_pt *pt = thread_current ()->suppl_pt;
   struct list_elem *e;
@@ -182,6 +185,22 @@ suppl_pt_get_page(void *upage)
          return pte;
     }
   return NULL;
+}
+
+/* Updates dirty bit at the given supplemental page table entry
+   PTE to its associated page table entries and then returns it. */
+bool
+suppl_pt_update_dirty (struct suppl_pte *pte)
+{
+  ASSERT (pte != NULL);
+
+  if (pte->kpage == NULL)
+    return;
+
+  pte->dirty = pte->dirty || pagedir_is_dirty (pte->pagedir, pte->upage)
+               || pagedir_is_dirty (pte->pagedir, pte->kpage);
+
+  return pte->dirty;
 }
 
 /* Frees a supplemental page table entry.
