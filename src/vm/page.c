@@ -14,7 +14,7 @@ static void suppl_pt_free_pte (struct suppl_pte *);
 struct suppl_pt *
 suppl_pt_create (void)
 {
-  struct suppl_pt *pt = malloc (sizeof (struct suppl_pt *));
+  struct suppl_pt *pt = malloc (sizeof (struct suppl_pt));
   if (pt == NULL)
     return NULL;
 
