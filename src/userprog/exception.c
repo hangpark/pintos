@@ -164,8 +164,11 @@ page_fault (struct intr_frame *f)
   /* Stack growth. */
   uint32_t *esp = user ? f->esp : thread_current ()->esp;
   if (STACK_LIMIT <= fault_addr && fault_addr < PHYS_BASE
-      && esp - 16 <= fault_addr && !suppl_pt_set_zero (upage))
-    goto page_level_protection_violation;
+      && esp - 16 <= fault_addr && suppl_pt_get_page (upage) == NULL)
+    {
+      if (!suppl_pt_set_zero (upage))
+        goto page_level_protection_violation;
+    }
 
   /* Load page from appropriate source. */
   if (suppl_pt_load_page (upage))

@@ -3,6 +3,7 @@
 
 #include <list.h>
 #include "filesys/file.h"
+#include "vm/swap.h"
 
 /* Page statuses. */
 enum page_type
@@ -25,6 +26,7 @@ struct suppl_pte
     void *upage;                    /* User virtual page. */
     void *kpage;                    /* Kernel virtual page.
                                        NULL if not on the memory. */
+    uint32_t *pagedir;              /* Page directory. */
     bool dirty;                     /* Dirty bit. */
     union
       {
@@ -38,7 +40,7 @@ struct suppl_pte
           };
         struct                      /* Only for page type PAGE_SWAP. */
           {
-            unsigned swap_index;    /* Swap disk index. */
+            size_t swap_index;      /* Swap disk index. */
           };
       };
 
@@ -52,6 +54,7 @@ bool suppl_pt_set_zero (void *upage);
 bool suppl_pt_set_file (void *upage, struct file *, off_t, uint32_t read_bytes,
                         uint32_t zero_bytes, bool writable);
 bool suppl_pt_load_page (void *upage);
+struct suppl_pte *suppl_pt_get_page (void *upage);
 void suppl_pt_clear_page (void *upage);
 
 #endif /* vm/page.h */

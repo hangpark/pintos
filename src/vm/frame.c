@@ -1,9 +1,12 @@
 #include "vm/frame.h"
+#include <bitmap.h>
 #include <debug.h>
 #include <list.h>
 #include "threads/malloc.h"
 #include "threads/palloc.h"
 #include "threads/synch.h"
+#include "userprog/pagedir.h"
+#include "vm/swap.h"
 
 /* Frame table lock. */
 struct lock frame_table_lock;
@@ -14,9 +17,13 @@ struct list frame_table;
 /* Frame table element. */
 struct frame
   {
-    void *kpage;                /* Kernel page maps to the physical address. */
-    struct list_elem elem;      /* List element. */
+    void *kpage;                  /* Kernel page maps to the frame. */
+    struct suppl_pte *suppl_pte;  /* Supplemental page table entry. */
+    struct list_elem elem;        /* List element. */
   };
+
+static struct frame *frame_evict_and_get (void);
+static struct frame *frame_to_evict (void);
 
 /* Initializes the frame table and its lock. */
 void
@@ -26,31 +33,44 @@ frame_table_init (void)
   list_init (&frame_table);
 }
 
-/* Allocates a new user frame with given flags.
+/* Allocates a new user frame with given pte and flags.
    Note that this method is used only for that user frame flag
    is set. */
 void *
-frame_alloc (enum palloc_flags flags)
+frame_alloc (struct suppl_pte *pte, enum palloc_flags flags)
 {
+  ASSERT (pte != NULL);
   ASSERT (flags & PAL_USER);
 
   lock_acquire (&frame_table_lock);
 
+  struct frame *f;
   void *kpage = palloc_get_page (flags); 
   if (kpage == NULL)
     {
+      f = frame_evict_and_get ();
+      if (f == NULL)
+        {
+          lock_release (&frame_table_lock);
+          return NULL;
+        }
+      f->suppl_pte = pte;
+
+      lock_release (&frame_table_lock);
+
+      return f->kpage;
+    }
+
+  f = malloc (sizeof (struct frame));
+  if (f == NULL)
+    {
+      palloc_free_page (kpage);
       lock_release (&frame_table_lock);
       return NULL;
     }
 
-  struct frame *f = malloc (sizeof (struct frame));
-  if (f == NULL)
-    {
-      palloc_free_page (kpage);
-      return NULL;
-    }
-
   f->kpage = kpage;
+  f->suppl_pte = pte;
   list_push_back (&frame_table, &f->elem);
 
   lock_release (&frame_table_lock);
@@ -58,10 +78,12 @@ frame_alloc (enum palloc_flags flags)
   return kpage;
 }
 
-
+/* Returns frame associated KPAGE. Returns NULL if failed. */
 static struct frame *
 frame_search (void *kpage)
 {
+  ASSERT (lock_held_by_current_thread (&frame_table_lock));
+
   struct frame *f = NULL;
   struct list_elem *e;
   for (e = list_begin (&frame_table); e != list_end (&frame_table);
@@ -96,6 +118,8 @@ frame_free (void *kpage)
   lock_release (&frame_table_lock);
 }
 
+/* Removes the frame table entry associated with KPAGE without
+   freeing it. */
 void
 frame_remove (void *kpage)
 {
@@ -109,4 +133,53 @@ frame_remove (void *kpage)
     }
 
   lock_release (&frame_table_lock);
+}
+
+static struct frame *
+frame_evict_and_get (void)
+{
+  ASSERT (lock_held_by_current_thread (&frame_table_lock));
+
+  struct frame *f = frame_to_evict ();
+  if (f == NULL)
+    return NULL;
+
+  ASSERT (f->suppl_pte != NULL);
+
+  size_t idx;
+  struct suppl_pte *pte = f->suppl_pte;
+  switch (pte->type)
+    {
+    case PAGE_FILE:
+      if (!pte->writable)
+        break;
+    case PAGE_ZERO:
+      // TODO: Implement dirty bit management
+      //if (!pte->dirty)
+      //  break;
+    case PAGE_SWAP:
+      idx = swap_out (f->kpage);
+      if (idx == BITMAP_ERROR)
+        return NULL;
+      pte->type = PAGE_SWAP;
+      pte->swap_index = idx;
+      break;
+
+    /* Unintended type. */
+    default:
+      NOT_REACHED ();
+    }
+
+  pte->kpage = NULL;
+  pagedir_clear_page (pte->pagedir, pte->upage);
+  return f;
+}
+
+static struct frame *
+frame_to_evict (void)
+{
+  struct frame *f = list_entry (list_begin (&frame_table), struct frame, elem);
+  list_remove (&f->elem);
+  list_push_back (&frame_table, &f->elem);
+  return f;
 }

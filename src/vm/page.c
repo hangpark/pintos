@@ -6,8 +6,10 @@
 #include "threads/vaddr.h"
 #include "userprog/pagedir.h"
 #include "vm/frame.h"
+#include "vm/swap.h"
 
 static void suppl_pt_free_pte (struct suppl_pte *);
+static void *suppl_pt_evict (void);
 
 /* Creates and returns a new supplemental page table. */
 struct suppl_pt *
@@ -39,24 +41,6 @@ suppl_pt_destroy (struct suppl_pt *pt)
   free (pt);
 }
 
-/* Returns the supplemental page table entry associated with
-   user virtual page UPAGE.
-   Returns NULL if not exist. */
-static struct suppl_pte *
-suppl_pt_search_page (void *upage)
-{
-  struct suppl_pt *pt = thread_current ()->suppl_pt;
-  struct list_elem *e;
-  for (e = list_begin (&pt->list); e != list_end (&pt->list);
-       e = list_next (e))
-    {
-       struct suppl_pte *pte = list_entry (e, struct suppl_pte, elem); 
-       if (pte->upage == upage)
-         return pte;
-    }
-  return NULL;
-}
-
 /* Adds a new supplemental page table entry of zero-fill with
    user virtual page UPAGE.
    Note that this does not involve actual frame allocation. */
@@ -70,6 +54,7 @@ suppl_pt_set_zero (void *upage)
   pte->type = PAGE_ZERO;
   pte->upage = upage;
   pte->kpage = NULL;
+  pte->pagedir = thread_current ()->pagedir;
   pte->dirty = false;
 
   struct suppl_pt *pt = thread_current ()->suppl_pt;
@@ -92,6 +77,7 @@ suppl_pt_set_file (void *upage, struct file *file, off_t ofs,
   pte->type = PAGE_FILE;
   pte->upage = upage;
   pte->kpage = NULL;
+  pte->pagedir = thread_current ()->pagedir;
   pte->dirty = false;
   pte->file = file;
   pte->ofs = ofs;
@@ -111,12 +97,12 @@ bool
 suppl_pt_load_page (void *upage)
 {
   /* Get supplemental page table entry. */
-  struct suppl_pte *pte = suppl_pt_search_page (upage);
+  struct suppl_pte *pte = suppl_pt_get_page (upage);
   if (pte == NULL || pte->kpage != NULL)
     return false;
 
   /* Obtain a new frame. */
-  void *kpage = frame_alloc (PAL_USER);
+  void *kpage = frame_alloc (pte, PAL_USER);
   if (kpage == NULL)
     return false;
 
@@ -144,7 +130,11 @@ suppl_pt_load_page (void *upage)
 
     /* Page content from the swap disk. */
     case PAGE_SWAP:
-      // TODO
+      if (!swap_in (kpage, pte->swap_index))
+        {
+          frame_free (kpage);
+          return false;
+        };
       break;
 
     /* Unintended type. */
@@ -153,8 +143,7 @@ suppl_pt_load_page (void *upage)
     }
 
   /* Install upage to kpage. */
-  uint32_t *pd = thread_current ()->pagedir;
-  if (!pagedir_set_page (pd, upage, kpage, writable))
+  if (!pagedir_set_page (pte->pagedir, upage, kpage, writable))
     {
       frame_free (kpage);
       return false;
@@ -173,9 +162,27 @@ suppl_pt_load_page (void *upage)
 void
 suppl_pt_clear_page (void *upage)
 {
-  struct suppl_pte *pte = suppl_pt_search_page (upage);
-  pagedir_clear_page (thread_current ()->pagedir, upage);
+  struct suppl_pte *pte = suppl_pt_get_page (upage);
+  pagedir_clear_page (pte->pagedir, upage);
   suppl_pt_free_pte (pte);
+}
+
+/* Returns the supplemental page table entry associated with
+   user virtual page UPAGE.
+   Returns NULL if not exist. */
+struct suppl_pte *
+suppl_pt_get_page(void *upage)
+{
+  struct suppl_pt *pt = thread_current ()->suppl_pt;
+  struct list_elem *e;
+  for (e = list_begin (&pt->list); e != list_end (&pt->list);
+       e = list_next (e))
+    {
+       struct suppl_pte *pte = list_entry (e, struct suppl_pte, elem); 
+       if (pte->upage == upage)
+         return pte;
+    }
+  return NULL;
 }
 
 /* Frees a supplemental page table entry.
@@ -190,9 +197,7 @@ suppl_pt_free_pte (struct suppl_pte *pte)
   if (pte->kpage != NULL)
     frame_remove (pte->kpage);
   else if (pte->type == PAGE_SWAP)
-    {
-      // TODO
-    }
+    swap_remove (pte->swap_index);
   list_remove (&pte->elem);
   free (pte);
 }
