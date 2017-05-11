@@ -1,5 +1,5 @@
 #include "vm/page.h"
-#include <list.h>
+#include <hash.h>
 #include <string.h>
 #include "threads/malloc.h"
 #include "threads/thread.h"
@@ -8,7 +8,9 @@
 #include "vm/frame.h"
 #include "vm/swap.h"
 
-static void suppl_pt_free_pte (struct suppl_pte *);
+static hash_hash_func suppl_pt_hash;
+static hash_less_func suppl_pt_less;
+static hash_action_func suppl_pt_free_pte;
 
 /* Creates and returns a new supplemental page table. */
 struct suppl_pt *
@@ -18,7 +20,7 @@ suppl_pt_create (void)
   if (pt == NULL)
     return NULL;
 
-  list_init (&pt->list);
+  hash_init (&pt->hash, suppl_pt_hash, suppl_pt_less, NULL);
 
   return pt;
 }
@@ -30,14 +32,7 @@ suppl_pt_create (void)
 void
 suppl_pt_destroy (struct suppl_pt *pt)
 {
-  struct list_elem *e;
-  for (e = list_begin (&pt->list); e != list_end (&pt->list);)
-    {
-       struct suppl_pte *pte = list_entry (e, struct suppl_pte, elem); 
-       e = list_next (e);
-       suppl_pt_free_pte (pte);
-    }
-  free (pt);
+  hash_destroy (&pt->hash, suppl_pt_free_pte);
 }
 
 /* Adds a new supplemental page table entry of zero-fill with
@@ -57,7 +52,7 @@ suppl_pt_set_zero (void *upage)
   pte->dirty = false;
 
   struct suppl_pt *pt = thread_current ()->suppl_pt;
-  list_push_back (&pt->list, &pte->elem);
+  hash_insert (&pt->hash, &pte->elem);
 
   return true;
 }
@@ -85,7 +80,7 @@ suppl_pt_set_file (void *upage, struct file *file, off_t ofs,
   pte->writable = writable;
 
   struct suppl_pt *pt = thread_current ()->suppl_pt;
-  list_push_back (&pt->list, &pte->elem);
+  hash_insert (&pt->hash, &pte->elem);
 
   return true;
 }
@@ -166,7 +161,9 @@ suppl_pt_clear_page (void *upage)
 {
   struct suppl_pte *pte = suppl_pt_get_page (upage);
   pagedir_clear_page (pte->pagedir, upage);
-  suppl_pt_free_pte (pte);
+  if (pte == NULL)
+    return;
+  suppl_pt_free_pte (&pte->elem, thread_current ()->suppl_pt);
 }
 
 /* Returns the supplemental page table entry associated with
@@ -176,15 +173,12 @@ struct suppl_pte *
 suppl_pt_get_page (void *upage)
 {
   struct suppl_pt *pt = thread_current ()->suppl_pt;
-  struct list_elem *e;
-  for (e = list_begin (&pt->list); e != list_end (&pt->list);
-       e = list_next (e))
-    {
-       struct suppl_pte *pte = list_entry (e, struct suppl_pte, elem); 
-       if (pte->upage == upage)
-         return pte;
-    }
-  return NULL;
+  struct suppl_pte pte;
+  struct hash_elem *e;
+
+  pte.upage = upage;
+  e = hash_find (&pt->hash, &pte.elem);
+  return e != NULL ? hash_entry (e, struct suppl_pte, elem) : NULL;
 }
 
 /* Updates dirty bit at the given supplemental page table entry
@@ -195,7 +189,7 @@ suppl_pt_update_dirty (struct suppl_pte *pte)
   ASSERT (pte != NULL);
 
   if (pte->kpage == NULL)
-    return;
+    return pte->dirty;
 
   pte->dirty = pte->dirty || pagedir_is_dirty (pte->pagedir, pte->upage)
                || pagedir_is_dirty (pte->pagedir, pte->kpage);
@@ -203,19 +197,34 @@ suppl_pt_update_dirty (struct suppl_pte *pte)
   return pte->dirty;
 }
 
-/* Frees a supplemental page table entry.
-   This also removes the frame table entry, but not frees
-   allocated page. */ 
-static void
-suppl_pt_free_pte (struct suppl_pte *pte)
+static unsigned
+suppl_pt_hash (const struct hash_elem *e, void *aux UNUSED)
 {
-  if (pte == NULL)
-    return;
+  struct suppl_pte *pte = hash_entry (e, struct suppl_pte, elem);
+  return hash_bytes (&pte->upage, sizeof pte->upage);
+}
 
+static bool
+suppl_pt_less (const struct hash_elem *e1, const struct hash_elem *e2,
+               void *aux UNUSED)
+{
+  struct suppl_pte *pte1 = hash_entry (e1, struct suppl_pte, elem);
+  struct suppl_pte *pte2 = hash_entry (e2, struct suppl_pte, elem);
+  return pte1->upage < pte2->upage;
+}
+
+/* Frees a supplemental page table entry.
+   This also removes the frame table entry if supplemental page
+   PT is given, but not frees allocated page. */ 
+static void
+suppl_pt_free_pte (struct hash_elem *e, void *pt)
+{
+  struct suppl_pte *pte = hash_entry (e, struct suppl_pte, elem);
   if (pte->kpage != NULL)
     frame_remove (pte->kpage);
   else if (pte->type == PAGE_SWAP)
     swap_remove (pte->swap_index);
-  list_remove (&pte->elem);
+  if (pt != NULL)
+    hash_delete (&((struct suppl_pt *) pt)->hash, &pte->elem);
   free (pte);
 }

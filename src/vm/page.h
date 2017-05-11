@@ -1,7 +1,7 @@
 #ifndef VM_PAGE_H
 #define VM_PAGE_H
 
-#include <list.h>
+#include <hash.h>
 #include "filesys/file.h"
 #include "vm/swap.h"
 
@@ -16,7 +16,7 @@ enum page_type
 /* Supplemental page table. */
 struct suppl_pt
   {
-    struct list list;   /* List. */
+    struct hash hash;   /* Hash table. */
   };
 
 /* Supplemental page table entry. */
@@ -44,7 +44,7 @@ struct suppl_pte
           };
       };
 
-    struct list_elem elem;          /* List element. */
+    struct hash_elem elem;          /* Hash element. */
   };
 
 struct suppl_pt *suppl_pt_create (void);
