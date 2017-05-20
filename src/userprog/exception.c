@@ -8,7 +8,7 @@
 #include "userprog/gdt.h"
 #include "userprog/syscall.h"
 
-#define STACK_LIMIT 0x40000000
+#define STACK_LIMIT ((void *) 0x40000000)
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -164,7 +164,7 @@ page_fault (struct intr_frame *f)
   /* Stack growth. */
   uint32_t *esp = user ? f->esp : thread_current ()->esp;
   if (STACK_LIMIT <= fault_addr && fault_addr < PHYS_BASE
-      && esp - 16 <= fault_addr && suppl_pt_get_page (upage) == NULL)
+      && (void *) (esp - 16) <= fault_addr && suppl_pt_get_page (upage) == NULL)
     {
       if (!suppl_pt_set_zero (upage))
         goto page_level_protection_violation;
@@ -173,9 +173,9 @@ page_fault (struct intr_frame *f)
   /* Load page from appropriate source. */
   if (suppl_pt_load_page (upage))
     return;
-#endif
 
  page_level_protection_violation:
+#endif
   /* Change EIP to the next instruction address which is saved on
      EAX, and set EAX by -1 to return the failure code. */
   if (!user)
