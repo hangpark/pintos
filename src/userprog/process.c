@@ -7,6 +7,9 @@
 #include <string.h>
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
+#ifdef VM
+#include "userprog/syscall.h"
+#endif
 #include "userprog/tss.h"
 #include "filesys/directory.h"
 #include "filesys/file.h"
@@ -24,6 +27,9 @@
 #endif
 
 #define FD_MIN 2            /* Min value for file descriptors. */
+#ifdef VM
+#define MAPID_MIN 0         /* Min value for memory mapped identifiers. */
+#endif
 
 /* Structure for arguments. */
 struct arguments
@@ -132,6 +138,9 @@ start_process (void *arguments)
     }
   curr->exec_file = exec_file;
   curr->fd_next = FD_MIN;
+#ifdef VM
+  curr->mapid_next = MAPID_MIN;
+#endif
 
   /* Free resources. */
   palloc_free_page (args->argv[0]);
@@ -206,6 +215,14 @@ process_exit (void)
       file_close (pfe->file);
       free (pfe);
     }
+#ifdef VM
+  for (e = list_begin (&proc->mmap_list); e != list_end (&proc->mmap_list);)
+    {
+      struct process_mmap *mmap = list_entry (e, struct process_mmap, elem);
+      e = list_next (e);
+      unmap_mmap_item (mmap);
+    }
+#endif
 
   struct thread *curr = thread_current ();
   struct suppl_pt *pt;
@@ -307,6 +324,42 @@ process_set_file (struct file *file)
   /* Return the file descriptor. */
   return pfe->fd;
 }
+
+#ifdef VM
+/* Returns a process' memory mapped file by its identifier. */
+struct process_mmap *
+process_get_mmap (mapid_t id)
+{
+  struct list *list = &process_current ()->mmap_list;
+  struct list_elem *e;
+  for (e = list_begin (list); e != list_end (list); e = list_next (e))
+    {
+      struct process_mmap *mmap = list_entry (e, struct process_mmap, elem);
+      if (mmap->id == id)
+        return mmap;
+    }
+  return NULL;
+}
+
+/* Sets the memory mapped file information into
+   the current process and returns its identifier. */
+mapid_t
+process_set_mmap (struct file *file, void *addr, size_t size)
+{
+  struct process_mmap *mmap = malloc (sizeof (struct process_mmap));
+  if (mmap == NULL)
+    return MAP_FAILED;
+
+  struct process *curr = process_current ();
+  mmap->id = curr->mapid_next++;
+  mmap->file = file;
+  mmap->addr = addr;
+  mmap->size = size;
+  list_push_back (&curr->mmap_list, &mmap->elem);
+
+  return mmap->id;
+}
+#endif
 
 /* We load ELF binaries.  The following definitions are taken
    from the ELF specification, [ELF1], more-or-less verbatim.  */

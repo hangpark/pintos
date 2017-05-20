@@ -56,6 +56,7 @@ bool suppl_pt_set_file (void *upage, struct file *, off_t, uint32_t read_bytes,
 bool suppl_pt_load_page (void *upage);
 struct suppl_pte *suppl_pt_get_page (void *upage);
 void suppl_pt_clear_page (void *upage);
+void suppl_pt_free_pte (struct hash_elem *e, void *pt);
 
 bool suppl_pt_update_dirty (struct suppl_pte *);
 

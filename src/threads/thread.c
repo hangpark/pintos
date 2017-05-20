@@ -499,6 +499,7 @@ init_thread (struct thread *t, const char *name, int priority)
 #ifdef USERPROG
   list_init (&(&t->process)->child_list);
   list_init (&(&t->process)->file_list);
+  list_init (&(&t->process)->mmap_list);
 #endif
 }
 
