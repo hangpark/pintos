@@ -10,7 +10,6 @@
 
 static hash_hash_func suppl_pt_hash;
 static hash_less_func suppl_pt_less;
-static hash_action_func suppl_pt_free_pte;
 
 /* Creates and returns a new supplemental page table. */
 struct suppl_pt *
@@ -41,6 +40,8 @@ suppl_pt_destroy (struct suppl_pt *pt)
 bool
 suppl_pt_set_zero (void *upage)
 {
+  if (suppl_pt_get_page (upage) != NULL)
+    return false;
   struct suppl_pte *pte = malloc (sizeof (struct suppl_pte));
   if (pte == NULL)
     return false;
@@ -64,6 +65,8 @@ bool
 suppl_pt_set_file (void *upage, struct file *file, off_t ofs,
                    uint32_t read_bytes, uint32_t zero_bytes, bool writable)
 {
+  if (suppl_pt_get_page (upage) != NULL)
+    return false;
   struct suppl_pte *pte = malloc (sizeof (struct suppl_pte));
   if (pte == NULL)
     return false;
@@ -160,9 +163,9 @@ void
 suppl_pt_clear_page (void *upage)
 {
   struct suppl_pte *pte = suppl_pt_get_page (upage);
-  pagedir_clear_page (pte->pagedir, upage);
   if (pte == NULL)
     return;
+  pagedir_clear_page (pte->pagedir, upage);
   suppl_pt_free_pte (&pte->elem, thread_current ()->suppl_pt);
 }
 
@@ -216,7 +219,7 @@ suppl_pt_less (const struct hash_elem *e1, const struct hash_elem *e2,
 /* Frees a supplemental page table entry.
    This also removes the frame table entry if supplemental page
    PT is given, but not frees allocated page. */ 
-static void
+void
 suppl_pt_free_pte (struct hash_elem *e, void *pt)
 {
   struct suppl_pte *pte = hash_entry (e, struct suppl_pte, elem);

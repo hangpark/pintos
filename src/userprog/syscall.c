@@ -1,7 +1,7 @@
 #include "userprog/syscall.h"
+#include <debug.h>
 #include <stdio.h>
 #include <syscall-nr.h>
-#include <debug.h>
 #include "devices/input.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
@@ -12,6 +12,12 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "userprog/process.h"
+#ifdef VM
+#include "userprog/pagedir.h"
+#include "vm/frame.h"
+#include "vm/page.h"
+#include "vm/swap.h"
+#endif
 
 /* A Lock for mutual exclusion between system calls. */
 static struct lock filesys_lock;
@@ -36,6 +42,10 @@ static int syscall_write (int fd, void *buffer, unsigned size);
 static void syscall_seek (int fd, unsigned position);
 static unsigned syscall_tell (int fd);
 static void syscall_close (int fd);
+#ifdef VM
+static mapid_t syscall_mmap (int fd, void *addr);
+static void syscall_munmap (mapid_t mapping);
+#endif
 
 void
 syscall_init (void)
@@ -98,9 +108,19 @@ syscall_handler (struct intr_frame *f UNUSED)
     case SYS_CLOSE:
       syscall_close ((int) get_word (esp + 1));
       break;
+#ifdef VM
+    case SYS_MMAP:
+      f->eax = syscall_mmap ((int) get_word (esp + 1),
+                             (void *) get_word (esp + 2));
+      break;
+    case SYS_MUNMAP:
+      syscall_munmap ((mapid_t) get_word (esp + 1));
+      break;
+#endif
     default:
       /* Undefined system calls. */
       thread_exit ();
+      NOT_REACHED ();
     }
 }
 
@@ -377,6 +397,128 @@ syscall_close (int fd)
     }
   lock_release (&filesys_lock);
 }
+
+#ifdef VM
+/* Maps the file open as FD into the process’s virtual address
+   space. */
+static mapid_t
+syscall_mmap (int fd, void *addr)
+{
+  off_t fault_ofs = -1;
+  struct file *f = NULL;
+
+  /* Check the validity. */
+  lock_acquire (&filesys_lock);
+  if (addr == NULL || !is_user_vaddr (addr) || pg_ofs (addr) != 0)
+    goto fail;
+
+  /* Get the file. */
+  f = process_get_file (fd);
+  if (f == NULL)
+    goto fail;
+
+  /* Reopen the file. */
+  size_t size;
+  f = file_reopen (f);
+  if (f == NULL || (size = file_length (f)) == 0)
+    goto fail;
+
+  /* Install a new page. */
+  off_t ofs;
+  for (ofs = 0; (size_t) ofs < size; ofs += PGSIZE)
+    {
+      size_t read_bytes = (size_t) ofs + PGSIZE < size ? PGSIZE : size - ofs;
+      size_t zero_bytes = PGSIZE - read_bytes;
+      if (!suppl_pt_set_file (addr + ofs, f, ofs, read_bytes, zero_bytes, true))
+        {
+          fault_ofs = ofs;
+          goto fail;
+        }
+    }
+  fault_ofs = size;
+
+  /* Create a new mmap item. */
+  mapid_t id = process_set_mmap (f, addr, size);
+  if (id == MAP_FAILED)
+    goto fail;
+
+  /* Return mapping id. */
+  lock_release (&filesys_lock);
+  return id;
+
+ fail:
+  for (ofs = 0; ofs < fault_ofs; ofs += PGSIZE)
+    suppl_pt_clear_page (addr + ofs);
+  file_close (f);
+  lock_release (&filesys_lock);
+  return MAP_FAILED;
+}
+
+/* Unmaps the mapping designated by mapping, which must be
+   a mapping ID returned by a previous call to mmap by
+   the same process that has not yet been unmapped. */
+static void
+syscall_munmap (mapid_t mapping)
+{
+  struct process_mmap *mmap = process_get_mmap (mapping);
+  if (mmap == NULL)
+    return;
+  unmap_mmap_item (mmap);
+}
+
+/* Unmaps the mapping, which must be a mapping ID returned by
+   a previous call to mmap by the same process that has not yet
+   been unmapped. */
+void
+unmap_mmap_item (struct process_mmap *mmap)
+{
+  ASSERT (pg_ofs (mmap->addr) == 0);
+
+  lock_acquire (&filesys_lock);
+  
+  /* Write back to the file. */
+  off_t ofs;
+  for (ofs = 0; (size_t) ofs < mmap->size; ofs += PGSIZE)
+    {
+      void *addr = mmap->addr + ofs;
+      struct suppl_pte *pte = suppl_pt_get_page (addr);
+      if (pte == NULL)
+        continue;
+
+      /* If page is loaded now. */
+      if (pte->kpage != NULL)
+        {
+          if (suppl_pt_update_dirty (pte))
+            file_write_at (mmap->file, pte->kpage, PGSIZE, ofs);
+          frame_remove (pte->kpage);
+          palloc_free_page (pte->kpage);
+        }
+      /* If page is on swap disk. */
+      else if (pte->type == PAGE_SWAP)
+        {
+          if (suppl_pt_update_dirty (pte))
+            {
+              void *kpage = palloc_get_page (0);
+              swap_in (kpage, pte->swap_index);
+              file_write_at (mmap->file, pte->kpage, PGSIZE, ofs);
+              palloc_free_page (kpage);
+            }
+          else
+            swap_remove (pte->swap_index);
+        }
+
+      /* Free resources. */
+      pagedir_clear_page (pte->pagedir, pte->upage);
+      hash_delete (&thread_current ()->suppl_pt->hash, &pte->elem);
+    }
+
+  /* Free resources. */
+  list_remove (&mmap->elem);
+  file_close (mmap->file);
+  free (mmap);
+  lock_release (&filesys_lock);
+}
+#endif
 
 /* Reads a byte at user virtual address UADDR.
    Returns the byte value if successful, -1 if a segfault
