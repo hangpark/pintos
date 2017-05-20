@@ -13,6 +13,7 @@
 #include "threads/vaddr.h"
 #include "userprog/process.h"
 #ifdef VM
+#include "userprog/pagedir.h"
 #include "vm/frame.h"
 #include "vm/page.h"
 #include "vm/swap.h"

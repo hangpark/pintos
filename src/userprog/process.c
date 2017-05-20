@@ -7,9 +7,6 @@
 #include <string.h>
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
-#ifdef VM
-#include "userprog/syscall.h"
-#endif
 #include "userprog/tss.h"
 #include "filesys/directory.h"
 #include "filesys/file.h"
@@ -22,6 +19,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #ifdef VM
+#include "userprog/syscall.h"
 #include "vm/frame.h"
 #include "vm/page.h"
 #endif
@@ -225,13 +223,14 @@ process_exit (void)
 #endif
 
   struct thread *curr = thread_current ();
-  struct suppl_pt *pt;
   uint32_t *pd;
 
+#ifdef VM
   /* Destroy the current process's supplemental page table. */
-  pt = curr->suppl_pt;
+  struct suppl_pt *pt = curr->suppl_pt;
   if (pt != NULL)
     suppl_pt_destroy (pt);
+#endif
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -452,10 +451,12 @@ load (struct arguments *args, void (**eip) (void), void **esp,
     goto fail;
   process_activate ();
 
+#ifdef VM
   /* Allocate supplemental page table. */
   t->suppl_pt = suppl_pt_create ();
   if (t->suppl_pt == NULL)
     goto fail;
+#endif
 
   /* Open executable file. */
   file = filesys_open (file_name);
@@ -560,7 +561,9 @@ load (struct arguments *args, void (**eip) (void), void **esp,
 
 /* load() helpers. */
 
+#ifndef VM
 static bool install_page (void *upage, void *kpage, bool writable);
+#endif
 
 /* Checks whether PHDR describes a valid, loadable segment in
    FILE and returns true if so, false otherwise. */
@@ -711,6 +714,7 @@ setup_stack (struct arguments *args, void **esp)
 #endif
 }
 
+#ifndef VM
 /* Adds a mapping from user virtual address UPAGE to kernel
    virtual address KPAGE to the page table.
    If WRITABLE is true, the user process may modify the page;
@@ -730,6 +734,7 @@ install_page (void *upage, void *kpage, bool writable)
   return (pagedir_get_page (t->pagedir, upage) == NULL
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
 }
+#endif
 
 /* Push arguments on newly initialized stack. Returns pointer
    that ESP should point to if successful, NULL otherwise. */
