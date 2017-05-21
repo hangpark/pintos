@@ -14,14 +14,14 @@
 #include "vm/swap.h"
 
 /* Frame table lock. */
-struct lock frame_table_lock;
+static struct lock frame_table_lock;
 
 /* Frame table. */
-struct list frame_table;
+static struct list frame_table;
 
 #ifdef VM_CLOCK
 /* Current frame table position. */
-struct list_elem *frame_table_pos;
+static struct list_elem *frame_table_pos;
 #endif
 
 /* Frame table element. */
@@ -216,6 +216,7 @@ static struct frame *
 frame_next_circ (void)
 {
   ASSERT (!list_empty (&frame_table));
+  ASSERT (lock_held_by_current_thread (&frame_table_lock));
 
   struct list_elem *next;
   if (frame_table_pos == list_back (&frame_table)
@@ -233,6 +234,8 @@ frame_next_circ (void)
 static struct frame *
 frame_to_evict_clock (void)
 {
+  ASSERT (lock_held_by_current_thread (&frame_table_lock));
+
   struct frame *f;
   for (f = frame_next_circ ();
        pagedir_is_accessed (f->suppl_pte->pagedir, f->suppl_pte->upage);
@@ -248,6 +251,8 @@ frame_to_evict_clock (void)
 static struct frame *
 frame_to_evict_fifo (void)
 {
+  ASSERT (lock_held_by_current_thread (&frame_table_lock));
+
   struct frame *f = list_entry (list_begin (&frame_table), struct frame, elem);
   list_remove (&f->elem);
   list_push_back (&frame_table, &f->elem);
