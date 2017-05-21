@@ -24,14 +24,6 @@ static struct list frame_table;
 static struct list_elem *frame_table_pos;
 #endif
 
-/* Frame table element. */
-struct frame
-  {
-    void *kpage;                  /* Kernel page maps to the frame. */
-    struct suppl_pte *suppl_pte;  /* Supplemental page table entry. */
-    struct list_elem elem;        /* List element. */
-  };
-
 static struct frame *frame_evict_and_get (void);
 #ifdef VM_CLOCK
 static struct frame *frame_to_evict_clock (void);
@@ -53,7 +45,7 @@ frame_table_init (void)
 /* Allocates a new user frame with given pte and flags.
    Note that this method is used only for that user frame flag
    is set. */
-void *
+struct frame *
 frame_alloc (struct suppl_pte *pte, enum palloc_flags flags)
 {
   ASSERT (pte != NULL);
@@ -73,9 +65,11 @@ frame_alloc (struct suppl_pte *pte, enum palloc_flags flags)
         }
       f->suppl_pte = pte;
 
+      list_remove (&f->elem);
+
       lock_release (&frame_table_lock);
 
-      return f->kpage;
+      return f;
     }
 
   f = malloc (sizeof (struct frame));
@@ -88,11 +82,17 @@ frame_alloc (struct suppl_pte *pte, enum palloc_flags flags)
 
   f->kpage = kpage;
   f->suppl_pte = pte;
-  list_push_back (&frame_table, &f->elem);
 
   lock_release (&frame_table_lock);
 
-  return kpage;
+  return f;
+}
+
+/* Appends the frame entry into the frame table. */
+void
+frame_append (struct frame *frame)
+{
+  list_push_back (&frame_table, &frame->elem);
 }
 
 /* Returns frame associated KPAGE. Returns NULL if failed. */
@@ -120,21 +120,17 @@ frame_search (void *kpage)
 /* Frees the given frame at kpage.
    If such frame exists in the frame table, remove it. */
 void
-frame_free (void *kpage)
+frame_free (struct frame *frame)
 {
   lock_acquire (&frame_table_lock);
 
-  struct frame *f = frame_search (kpage);
-  if (f != NULL)
-    {
 #ifdef VM_CLOCK
-      if (&f->elem == frame_table_pos)
-        frame_table_pos = list_next (frame_table_pos);
+  if (&frame->elem == frame_table_pos)
+    frame_table_pos = list_next (frame_table_pos);
 #endif
-      list_remove (&f->elem);
-      free (f);
-    }
-  palloc_free_page (kpage);
+  list_remove (&frame->elem);
+  free (frame);
+  palloc_free_page (frame->kpage);
 
   lock_release (&frame_table_lock);
 }
