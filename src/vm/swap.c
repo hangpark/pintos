@@ -1,18 +1,27 @@
 #include <bitmap.h>
 #include <debug.h>
 #include "devices/disk.h"
+#include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "vm/swap.h"
 
 #define SECTORS_PER_PAGE (PGSIZE / DISK_SECTOR_SIZE)
 
+/* Swap table lock. */
+static struct lock swap_table_lock;
+
+/* Swap disk. */
 static struct disk *swap_disk;
+
+/* Swap table. */
 static struct bitmap *swap_table;
 
 /* Initializes the swap table. */
 void
 swap_table_init (void)
 {
+  lock_init (&swap_table_lock);
+
   /* Get swap disk. */
   swap_disk = disk_get (1, 1);
   if (swap_disk == NULL)
@@ -38,13 +47,21 @@ swap_table_init (void)
 bool
 swap_in (void *kpage, size_t idx)
 {
+  lock_acquire (&swap_table_lock);
+
   /* False if index is larger than swap table size. */
   if (idx >= bitmap_size (swap_table))
-    return false;
+    {
+      lock_release (&swap_table_lock);
+      return false;
+    }
 
   /* False if swap slot is empty. */
   if (bitmap_test (swap_table, idx))
-    return false;
+    {
+      lock_release (&swap_table_lock);
+      return false;
+    }
 
   /* Copy contents from swap disk to frame. */
   disk_sector_t sec_no = SECTORS_PER_PAGE * idx;
@@ -59,6 +76,8 @@ swap_in (void *kpage, size_t idx)
   /* Set swap slot empty. */
   bitmap_set (swap_table, idx, true);
 
+  lock_release (&swap_table_lock);
+
   return true;
 }
 
@@ -68,10 +87,15 @@ swap_in (void *kpage, size_t idx)
 size_t
 swap_out (void *kpage)
 {
+  lock_acquire (&swap_table_lock);
+
   /* Get empty swap slot. */
   size_t idx = bitmap_scan (swap_table, 0, 1, true);
   if (idx == BITMAP_ERROR)
-    return BITMAP_ERROR;
+    {
+      lock_release (&swap_table_lock);
+      return BITMAP_ERROR;
+    }
 
   /* Copy contents from frame to swap disk. */
   disk_sector_t sec_no = SECTORS_PER_PAGE * idx;
@@ -86,6 +110,8 @@ swap_out (void *kpage)
   /* Set swap slot not empty. */
   bitmap_set (swap_table, idx, false);
 
+  lock_release (&swap_table_lock);
+
   return idx;
 }
 
@@ -93,5 +119,7 @@ swap_out (void *kpage)
 void
 swap_remove (size_t idx)
 {
+  lock_acquire (&swap_table_lock);
   bitmap_set (swap_table, idx, true);
+  lock_release (&swap_table_lock);
 }

@@ -63,7 +63,8 @@ suppl_pt_set_zero (void *upage)
    Note that this does not involve actual frame allocation. */
 bool
 suppl_pt_set_file (void *upage, struct file *file, off_t ofs,
-                   uint32_t read_bytes, uint32_t zero_bytes, bool writable)
+                   uint32_t read_bytes, uint32_t zero_bytes,
+                   bool writable, bool mmap)
 {
   if (suppl_pt_get_page (upage) != NULL)
     return false;
@@ -81,6 +82,7 @@ suppl_pt_set_file (void *upage, struct file *file, off_t ofs,
   pte->read_bytes = read_bytes;
   pte->zero_bytes = zero_bytes;
   pte->writable = writable;
+  pte->mmap = mmap;
 
   struct suppl_pt *pt = thread_current ()->suppl_pt;
   hash_insert (&pt->hash, &pte->elem);
@@ -99,8 +101,8 @@ suppl_pt_load_page (void *upage)
     return false;
 
   /* Obtain a new frame. */
-  void *kpage = frame_alloc (pte, PAL_USER);
-  if (kpage == NULL)
+  struct frame *f = frame_alloc (pte, PAL_USER);
+  if (f == NULL)
     return false;
 
   /* Load page content for each page type. */
@@ -109,27 +111,27 @@ suppl_pt_load_page (void *upage)
     {
     /* Page filled with zeros. */
     case PAGE_ZERO:
-      memset (kpage, 0, PGSIZE);
+      memset (f->kpage, 0, PGSIZE);
       break;
 
     /* Page content from the file system. */
     case PAGE_FILE:
       file_seek (pte->file, pte->ofs);
-      if (file_read (pte->file, kpage, pte->read_bytes)
+      if (file_read (pte->file, f->kpage, pte->read_bytes)
           != (int) pte->read_bytes)
         {
-          frame_free (kpage);
+          frame_free (f);
           return false;
         }
-      memset (kpage + pte->read_bytes, 0, pte->zero_bytes);
+      memset (f->kpage + pte->read_bytes, 0, pte->zero_bytes);
       writable = pte->writable;
       break;
 
     /* Page content from the swap disk. */
     case PAGE_SWAP:
-      if (!swap_in (kpage, pte->swap_index))
+      if (!swap_in (f->kpage, pte->swap_index))
         {
-          frame_free (kpage);
+          frame_free (f);
           return false;
         };
       break;
@@ -140,17 +142,20 @@ suppl_pt_load_page (void *upage)
     }
 
   /* Install upage to kpage. */
-  if (!pagedir_set_page (pte->pagedir, upage, kpage, writable))
+  if (!pagedir_set_page (pte->pagedir, upage, f->kpage, writable))
     {
-      frame_free (kpage);
+      frame_free (f);
       return false;
     }
 
   /* Set dirty value of kernel page to false. */
-  pagedir_set_dirty (pte->pagedir, kpage, false);
+  pagedir_set_dirty (pte->pagedir, f->kpage, false);
 
   /* Append result to supplemental page table. */
-  pte->kpage = kpage;
+  pte->kpage = f->kpage;
+
+  /* Append frame entry to the frame table. */
+  frame_append (f);
 
   return true;
 }

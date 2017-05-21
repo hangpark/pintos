@@ -429,7 +429,8 @@ syscall_mmap (int fd, void *addr)
     {
       size_t read_bytes = (size_t) ofs + PGSIZE < size ? PGSIZE : size - ofs;
       size_t zero_bytes = PGSIZE - read_bytes;
-      if (!suppl_pt_set_file (addr + ofs, f, ofs, read_bytes, zero_bytes, true))
+      if (!suppl_pt_set_file (addr + ofs, f, ofs, read_bytes, zero_bytes,
+                              true, true))
         {
           fault_ofs = ofs;
           goto fail;
@@ -463,14 +464,27 @@ syscall_munmap (mapid_t mapping)
   struct process_mmap *mmap = process_get_mmap (mapping);
   if (mmap == NULL)
     return;
-  unmap_mmap_item (mmap);
+  mmap_unmap_item (mmap);
+}
+
+/* Wirtes data back to the original file with given offset. */
+off_t
+mmap_write_back (struct file *file, void *kpage, off_t ofs)
+{
+  lock_acquire (&filesys_lock);
+  file = file_reopen (file);
+  if (file == NULL)
+    return -1;
+  off_t writes_byte = file_write_at (file, kpage, PGSIZE, ofs);
+  lock_release (&filesys_lock);
+  return writes_byte;
 }
 
 /* Unmaps the mapping, which must be a mapping ID returned by
    a previous call to mmap by the same process that has not yet
    been unmapped. */
 void
-unmap_mmap_item (struct process_mmap *mmap)
+mmap_unmap_item (struct process_mmap *mmap)
 {
   ASSERT (pg_ofs (mmap->addr) == 0);
 
