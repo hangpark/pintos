@@ -2,14 +2,16 @@
 #define USERPROG_SYSCALL_H
 
 #ifdef VM
-#include "process.h"
+#include "filesys/off_t.h"
+#include "userprog/process.h"
 #endif
 
 void syscall_init (void);
 void syscall_exit (int);
 
 #ifdef VM
-void unmap_mmap_item (struct process_mmap *);
+off_t mmap_write_back (struct file *, void *kpage, off_t);
+void mmap_unmap_item (struct process_mmap *);
 #endif
 
 #endif /* userprog/syscall.h */

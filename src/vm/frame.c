@@ -178,6 +178,13 @@ frame_evict_and_get (void)
     case PAGE_FILE:
       if (!pte->writable)
         break;
+      if (pte->mmap)
+        {
+          if (!suppl_pt_update_dirty (pte))
+            break;
+          if (mmap_write_back (pte->file, pte->kpage, pte->ofs) == -1)
+            return NULL;
+        }
 
     case PAGE_ZERO:
       if (!suppl_pt_update_dirty (pte))
