@@ -218,7 +218,7 @@ process_exit (void)
     {
       struct process_mmap *mmap = list_entry (e, struct process_mmap, elem);
       e = list_next (e);
-      unmap_mmap_item (mmap);
+      mmap_unmap_item (mmap);
     }
 #endif
 
@@ -643,7 +643,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 
 #ifdef VM
       if (!suppl_pt_set_file (upage, file, ofs, page_read_bytes,
-                              page_zero_bytes, writable))
+                              page_zero_bytes, writable, false))
         return false;
 #else
       /* Get a page of memory. */

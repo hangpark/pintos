@@ -63,7 +63,8 @@ suppl_pt_set_zero (void *upage)
    Note that this does not involve actual frame allocation. */
 bool
 suppl_pt_set_file (void *upage, struct file *file, off_t ofs,
-                   uint32_t read_bytes, uint32_t zero_bytes, bool writable)
+                   uint32_t read_bytes, uint32_t zero_bytes,
+                   bool writable, bool mmap)
 {
   if (suppl_pt_get_page (upage) != NULL)
     return false;
@@ -81,6 +82,7 @@ suppl_pt_set_file (void *upage, struct file *file, off_t ofs,
   pte->read_bytes = read_bytes;
   pte->zero_bytes = zero_bytes;
   pte->writable = writable;
+  pte->mmap = mmap;
 
   struct suppl_pt *pt = thread_current ()->suppl_pt;
   hash_insert (&pt->hash, &pte->elem);
