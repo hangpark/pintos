@@ -1,14 +1,17 @@
 #include "filesys/cache.h"
 #include <debug.h>
+#include <list.h>
 #include <stdbool.h>
 #include <string.h>
 #include "devices/timer.h"
 #include "filesys/filesys.h"
+#include "threads/malloc.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
 
 #define BUFFER_CACHE_NUM 64
 #define THREAD_FLUSH_BACK "buffer-cache-flush-back"
+#define THREAD_READ_AHEAD "buffer-cache-read-ahead"
 #define FLUSH_BACK_INTERVAL 500
 
 /* Buffer cache entry. */
@@ -30,6 +33,22 @@ static struct buffer_cache_entry buffer_cache[BUFFER_CACHE_NUM];
 /* Buffer cache array traversing position. */
 static int buffer_cache_pos;
 
+/* Read-ahead entry. */
+struct read_ahead_entry
+  {
+    disk_sector_t sector;             /* Sector number. */
+    struct list_elem elem;            /* List element. */
+  };
+
+/* Read-ahead semaphore. */
+static struct semaphore read_ahead_sema;
+
+/* Read-ahead lock. */
+static struct lock read_ahead_lock;
+
+/* Read-ahead list. */
+static struct list read_ahead_list;
+
 static struct buffer_cache_entry *buffer_cache_find (disk_sector_t);
 static struct buffer_cache_entry *buffer_cache_get_empty (void);
 static struct buffer_cache_entry *buffer_cache_to_evict (void);
@@ -46,16 +65,41 @@ buffer_cache_thread_flush_back (void *aux UNUSED)
     }
 }
 
+/* Thread function to read ahead sectors from the disk. */
+static void
+buffer_cache_thread_read_ahead (void *aux UNUSED)
+{
+  for (;;)
+    {
+      sema_down (&read_ahead_sema);
+      lock_acquire (&read_ahead_lock);
+
+      struct list_elem *e = list_pop_front (&read_ahead_list);
+      struct read_ahead_entry *entry = list_entry (e, struct read_ahead_entry,
+                                                   elem);
+      lock_acquire (&buffer_cache_lock);
+      buffer_cache_fetch (entry->sector, true);
+      lock_release (&buffer_cache_lock);
+
+      lock_release (&read_ahead_lock);
+    }
+}
+
 /* Initializes the buffer cache. */
 void
 buffer_cache_init (void)
 {
   lock_init (&buffer_cache_lock);
   buffer_cache_pos = 0;
+  sema_init (&read_ahead_sema, 0);
+  lock_init (&read_ahead_lock);
+  list_init (&read_ahead_list);
   int i;
   for (i = 0; i < BUFFER_CACHE_NUM; i++)
     buffer_cache[i].usebit = false;
   thread_create (THREAD_FLUSH_BACK, PRI_MAX, buffer_cache_thread_flush_back,
+                 NULL);
+  thread_create (THREAD_READ_AHEAD, PRI_MAX, buffer_cache_thread_read_ahead,
                  NULL);
 }
 
@@ -162,6 +206,20 @@ buffer_cache_remove (disk_sector_t sector)
     }
 
   lock_release (&buffer_cache_lock);
+}
+
+/* Read-ahead the given SECTOR into the buffer cache. */
+void
+buffer_cache_read_ahead (disk_sector_t sector)
+{
+  struct read_ahead_entry *entry = malloc (sizeof (struct read_ahead_entry));
+  if (entry == NULL)
+    return;
+  entry->sector = sector;
+
+  lock_acquire (&read_ahead_lock);
+  list_push_back (&read_ahead_list, &entry->elem);
+  lock_release (&read_ahead_lock);
 }
 
 /* Returns the buffer cache entry of the given SECTOR. Returns
