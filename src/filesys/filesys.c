@@ -2,6 +2,7 @@
 #include <debug.h>
 #include <stdio.h>
 #include <string.h>
+#include "filesys/cache.h"
 #include "filesys/file.h"
 #include "filesys/free-map.h"
 #include "filesys/inode.h"
@@ -22,6 +23,7 @@ filesys_init (bool format)
   if (filesys_disk == NULL)
     PANIC ("hd0:1 (hdb) not present, file system initialization failed");
 
+  buffer_cache_init ();
   inode_init ();
   free_map_init ();
 
@@ -36,6 +38,7 @@ filesys_init (bool format)
 void
 filesys_done (void) 
 {
+  buffer_cache_done ();
   free_map_close ();
 }
 
