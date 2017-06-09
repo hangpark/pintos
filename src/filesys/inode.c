@@ -231,8 +231,8 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
       else 
         {
           /* Read sector partially into caller's buffer. */
-          buffer_cache_memcpy (sector_idx, buffer + bytes_read, sector_ofs,
-                               chunk_size);
+          buffer_cache_read_at (sector_idx, buffer + bytes_read, sector_ofs,
+                                chunk_size);
         }
       
       /* Advance. */
@@ -255,7 +255,6 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
 {
   const uint8_t *buffer = buffer_;
   off_t bytes_written = 0;
-  uint8_t *bounce = NULL;
 
   if (inode->deny_write_cnt)
     return 0;
@@ -283,23 +282,11 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
         }
       else 
         {
-          /* We need a bounce buffer. */
-          if (bounce == NULL) 
-            {
-              bounce = malloc (DISK_SECTOR_SIZE);
-              if (bounce == NULL)
-                break;
-            }
-
-          /* If the sector contains data before or after the chunk
-             we're writing, then we need to read in the sector
-             first.  Otherwise we start with a sector of all zeros. */
           if (sector_ofs > 0 || chunk_size < sector_left) 
-            buffer_cache_read (sector_idx, bounce);
+            buffer_cache_write_at (sector_idx, buffer + bytes_written,
+                                   sector_ofs, chunk_size);
           else
-            memset (bounce, 0, DISK_SECTOR_SIZE);
-          memcpy (bounce + sector_ofs, buffer + bytes_written, chunk_size);
-          buffer_cache_write (sector_idx, bounce);
+            buffer_cache_write (sector_idx, buffer + bytes_written);
         }
 
       /* Advance. */
@@ -307,7 +294,6 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
       offset += chunk_size;
       bytes_written += chunk_size;
     }
-  free (bounce);
 
   return bytes_written;
 }
