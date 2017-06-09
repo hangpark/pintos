@@ -11,5 +11,6 @@ void buffer_cache_read (disk_sector_t, void *);
 void buffer_cache_write (disk_sector_t, const void *);
 void buffer_cache_memcpy (disk_sector_t, void *, off_t, size_t);
 void buffer_cache_remove (disk_sector_t);
+void buffer_cache_read_ahead (disk_sector_t);
 
 #endif /* filesys/cache.h */
