@@ -85,14 +85,37 @@ buffer_cache_done (void)
 void
 buffer_cache_read (disk_sector_t sector, void *addr)
 {
-  buffer_cache_memcpy (sector, addr, 0, DISK_SECTOR_SIZE);
+  buffer_cache_read_at (sector, addr, 0, DISK_SECTOR_SIZE);
+}
+
+/* Reads the part of data of SECTOR to ADDR.
+   If the sector is cached, reads data from it. Otherwise,
+   caches it and reads. This method may include evicting
+   less accessed cached sector to the disk if any cach entry
+   is available. */
+void
+buffer_cache_read_at (disk_sector_t sector, void *addr, off_t offset,
+                      size_t size)
+{
+  lock_acquire (&buffer_cache_lock);
+
+  struct buffer_cache_entry *entry = buffer_cache_fetch (sector, true);
+  memcpy (addr, entry->data + offset, size);
+  entry->accessed = true;
+
+  lock_release (&buffer_cache_lock);
 }
 
 /* Writes the data from ADDR to the SECTOR.
    If the sector is cached, writes data to it. Otherwise,
    caches it and writes. This method may include evicting
    less accessed cached sector to the disk if any cache entry
-   is available. */
+   is available.
+
+   This method is more efficient than using
+   buffer_cache_write_at (sector, addr, 0, DISK_SECTOR_SIZE)
+   because this method does not copy the whole data into
+   the buffer since those would be replaced with new data soon. */
 void
 buffer_cache_write (disk_sector_t sector, const void *addr)
 {
@@ -106,20 +129,21 @@ buffer_cache_write (disk_sector_t sector, const void *addr)
   lock_release (&buffer_cache_lock);
 }
 
-/* Copies the part of data of SECTOR to ADDR.
-   If the sector is cached, copies data from it. Otherwise,
-   caches it and copies. This method may include evicting
+/* Writes the data from ADDR to a part of SECTOR.
+   If the sector is cached, writes data from it. Otherwise,
+   caches it and writes. This method may include evicting
    less accessed cached sector to the disk if any cach entry
    is available. */
 void
-buffer_cache_memcpy (disk_sector_t sector, void *addr, off_t offset,
-                     size_t size)
+buffer_cache_write_at (disk_sector_t sector, const void *addr, off_t offset,
+                       size_t size)
 {
   lock_acquire (&buffer_cache_lock);
 
   struct buffer_cache_entry *entry = buffer_cache_fetch (sector, true);
-  memcpy (addr, entry->data + offset, size);
+  memcpy (entry->data + offset, addr, size);
   entry->accessed = true;
+  entry->dirty = true;
 
   lock_release (&buffer_cache_lock);
 }
