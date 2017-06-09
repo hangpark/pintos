@@ -1,10 +1,15 @@
 #include "filesys/cache.h"
+#include <debug.h>
 #include <stdbool.h>
 #include <string.h>
+#include "devices/timer.h"
 #include "filesys/filesys.h"
 #include "threads/synch.h"
+#include "threads/thread.h"
 
 #define BUFFER_CACHE_NUM 64
+#define THREAD_FLUSH_BACK "buffer-cache-flush-back"
+#define FLUSH_BACK_INTERVAL 500
 
 /* Buffer cache entry. */
 struct buffer_cache_entry
@@ -30,6 +35,17 @@ static struct buffer_cache_entry *buffer_cache_get_empty (void);
 static struct buffer_cache_entry *buffer_cache_to_evict (void);
 static struct buffer_cache_entry *buffer_cache_fetch (disk_sector_t, bool read);
 
+/* Thread function to flush back to the disk periodically. */
+static void
+buffer_cache_thread_flush_back (void *aux UNUSED)
+{
+  for (;;)
+    {
+      timer_sleep (FLUSH_BACK_INTERVAL);
+      buffer_cache_done ();
+    }
+}
+
 /* Initializes the buffer cache. */
 void
 buffer_cache_init (void)
@@ -39,6 +55,8 @@ buffer_cache_init (void)
   int i;
   for (i = 0; i < BUFFER_CACHE_NUM; i++)
     buffer_cache[i].usebit = false;
+  thread_create (THREAD_FLUSH_BACK, PRI_MAX, buffer_cache_thread_flush_back,
+                 NULL);
 }
 
 /* Shuts down the buffer cache module, writing any unwritten data
