@@ -14,4 +14,6 @@ void free_map_close (void);
 bool free_map_allocate (size_t, disk_sector_t *);
 void free_map_release (disk_sector_t, size_t);
 
+size_t free_map_allocate_r (size_t *, size_t, disk_sector_t *);
+
 #endif /* filesys/free-map.h */
